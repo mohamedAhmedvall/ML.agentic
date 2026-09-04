@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic Data Studio — prototype</title>
+  <style>
+    :root { color-scheme: dark; --bg:#080b12; --panel:#111621; --line:#293245; --muted:#8d98aa; --text:#f4f7fb; --cyan:#62e5d0; --violet:#9b8cff; --amber:#ffca70; --danger:#ff7285; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(circle at 48% -15%,#1b2340 0,#080b12 42%); color:var(--text); font:15px/1.45 Inter,ui-sans-serif,system-ui,sans-serif; }
+    button,input,select { font:inherit; }
+    button { cursor:pointer; }
+    .app { display:grid; grid-template-columns:250px minmax(500px,1fr) 340px; min-height:100vh; }
+    aside,.inspector { background:rgba(13,17,27,.93); padding:22px; }
+    aside { border-right:1px solid var(--line); }
+    .inspector { border-left:1px solid var(--line); }
+    .brand { display:flex; gap:10px; align-items:center; font-weight:760; letter-spacing:-.02em; font-size:18px; margin-bottom:30px; }
+    .mark { width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,var(--cyan),var(--violet));box-shadow:0 0 28px #62e5d044; }
+    .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.12em; margin:18px 0 9px; }
+    .nav { display:grid; gap:6px; }
+    .nav div { padding:10px 12px;border-radius:9px;color:#b9c2d0; }
+    .nav .active { color:white;background:#1b2231; }
+    main { min-width:0; }
+    header { display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid var(--line);background:#0b0f18cc; }
+    h1 { font-size:17px;margin:0; }
+    .sub { color:var(--muted);font-size:13px; }
+    .run { border:0;border-radius:10px;background:var(--cyan);color:#06110f;font-weight:800;padding:10px 17px; }
+    .run:disabled { opacity:.5;cursor:wait; }
+    .canvas { position:relative;min-height:calc(100vh - 69px);overflow:auto;padding:54px 48px; }
+    .goal { max-width:760px;margin:0 auto 45px;padding:16px 18px;border:1px solid var(--line);border-radius:13px;background:#0d121c; }
+    .goal strong { display:block;font-size:12px;color:var(--cyan);text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px; }
+    .flow { max-width:780px;margin:auto;display:grid;grid-template-columns:repeat(2,1fr);gap:34px 70px;position:relative; }
+    .node { position:relative;text-align:left;border:1px solid var(--line);border-radius:14px;background:linear-gradient(145deg,#171d2a,#10151f);color:white;padding:16px;min-height:116px;box-shadow:0 12px 28px #0004;transition:.2s; }
+    .node:hover,.node.selected { border-color:var(--violet);transform:translateY(-2px); }
+    .node.selected { box-shadow:0 0 0 3px #9b8cff22,0 15px 35px #0006; }
+    .node::before { content:"";position:absolute;left:50%;top:-35px;height:34px;border-left:1px solid #536079; }
+    .node.root::before { display:none; }
+    .wide { grid-column:1/-1;width:calc(50% - 35px);justify-self:center; }
+    .title { display:flex;justify-content:space-between;gap:8px;font-weight:700;margin-bottom:7px; }
+    .status { width:9px;height:9px;border-radius:50%;background:#546074;margin-top:6px;box-shadow:0 0 0 4px #54607422; }
+    .status.running { background:var(--amber);animation:pulse 1s infinite; }
+    .status.done { background:var(--cyan); }
+    .meta { color:var(--muted);font-size:13px; }
+    .result { margin-top:11px;color:#b9f6ec;font-size:12px;min-height:17px; }
+    @keyframes pulse { 50% { opacity:.35; } }
+    h2 { font-size:16px;margin:0 0 4px; }
+    .field { margin-top:17px; }
+    .field label { display:block;color:#aab4c3;margin-bottom:7px;font-size:13px; }
+    select,input[type=number] { width:100%;background:#0b1019;color:white;border:1px solid var(--line);border-radius:9px;padding:9px; }
+    .tools { display:grid;gap:8px; }
+    .tools label { display:flex;gap:8px;align-items:center;background:#0c111a;padding:8px;border-radius:8px; }
+    .hint { color:var(--muted);font-size:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line); }
+    @media (max-width:1000px) { .app { grid-template-columns:74px 1fr 300px; } aside { padding:18px 12px; } .brand span,.nav div span,.label { display:none; } .nav div { text-align:center; } }
+    @media (max-width:760px) { .app { display:block; } aside { display:none; } .inspector { border:0;border-top:1px solid var(--line); } .canvas { min-height:auto;padding:30px 18px; } .flow { gap:26px 14px; } .wide { width:calc(50% - 7px); } }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><i class="mark"></i><span>Agentic Data</span></div>
+    <div class="label">Projet</div>
+    <div class="nav"><div class="active">⌘ <span>Workflow</span></div><div>▣ <span>Données</span></div><div>◇ <span>Artefacts</span></div><div>⚙ <span>Outils</span></div></div>
+    <div class="label">Exécution</div>
+    <div class="nav"><div>◷ <span>Historique</span></div><div>✓ <span>Validations</span></div></div>
+  </aside>
+  <main>
+    <header><div><h1>Analyse des causes de churn</h1><div class="sub">Version 3 · 6 agents · Docker isolé</div></div><button class="run" id="run">Exécuter le workflow</button></header>
+    <section class="canvas">
+      <div class="goal"><strong>Objectif</strong>Identifier les facteurs de churn et produire un rapport exécutif dont les conclusions sont validées.</div>
+      <div class="flow" id="flow"></div>
+    </section>
+  </main>
+  <section class="inspector">
+    <h2 id="agentTitle">Profilage des données</h2><div class="sub" id="agentRole">Agent profiler</div>
+    <div class="field"><label for="model">Modèle</label><select id="model"><option>small-structured-model</option><option>coding-model</option><option>reasoning-model</option></select></div>
+    <div class="field"><label for="approval">Validation humaine</label><select id="approval"><option value="never">Jamais</option><option value="before_code_execution">Avant exécution du code</option><option value="always">Toujours</option></select></div>
+    <div class="field"><label for="retries">Nombre de reprises</label><input id="retries" type="number" min="0" max="5" value="1"></div>
+    <div class="field"><label>Outils autorisés</label><div class="tools" id="tools"></div></div>
+    <div class="hint">Réseau désactivé · 1 CPU · 2 Go RAM · 5 min maximum<br><br>Chaque modification crée une nouvelle version traçable du workflow.</div>
+  </section>
+</div>
+<script>
+const nodes=[
+ {id:'profile',title:'Profilage des données',role:'profiler',deps:[],model:'small-structured-model',approval:'never',retries:1,tools:['dataset.read','profile.compute']},
+ {id:'clean',title:'Nettoyage',role:'transformer',deps:['profile'],model:'coding-model',approval:'before_code_execution',retries:1,tools:['artifact.read','python.execute','artifact.write']},
+ {id:'explore',title:'Exploration des facteurs',role:'analyst',deps:['clean'],model:'reasoning-model',approval:'before_code_execution',retries:2,tools:['artifact.read','python.execute','chart.render']},
+ {id:'baseline',title:'Modèle de référence',role:'modeler',deps:['clean'],model:'coding-model',approval:'before_code_execution',retries:2,tools:['artifact.read','python.execute','model.evaluate']},
+ {id:'review',title:'Validation des preuves',role:'reviewer',deps:['explore','baseline'],model:'reasoning-model',approval:'always',retries:0,tools:['artifact.read','evidence.check']},
+ {id:'report',title:'Rapport exécutif',role:'reporter',deps:['review'],model:'reasoning-model',approval:'never',retries:1,tools:['artifact.read','report.write']}
+];
+const allTools=['dataset.read','profile.compute','artifact.read','python.execute','artifact.write','chart.render','model.evaluate','evidence.check','report.write'];
+const flow=document.querySelector('#flow'); let selected=nodes[0];
+function render(){ flow.innerHTML=nodes.map((n,i)=>`<button class="node ${i===0?'root ':''}${['profile','clean','review','report'].includes(n.id)?'wide ':''}${n===selected?'selected':''}" data-id="${n.id}"><div class="title"><span>${n.title}</span><i class="status" id="s-${n.id}"></i></div><div class="meta">${n.role} · ${n.model}</div><div class="result" id="r-${n.id}"></div></button>`).join(''); document.querySelectorAll('.node').forEach(el=>el.onclick=()=>select(el.dataset.id)); }
+function select(id){ selected=nodes.find(n=>n.id===id); render(); document.querySelector('#agentTitle').textContent=selected.title;document.querySelector('#agentRole').textContent=`Agent ${selected.role}`;document.querySelector('#model').value=selected.model;document.querySelector('#approval').value=selected.approval;document.querySelector('#retries').value=selected.retries;document.querySelector('#tools').innerHTML=allTools.map(t=>`<label><input type="checkbox" value="${t}" ${selected.tools.includes(t)?'checked':''}> ${t}</label>`).join(''); bind(); }
+function bind(){ document.querySelector('#model').onchange=e=>{selected.model=e.target.value;render()};document.querySelector('#approval').onchange=e=>selected.approval=e.target.value;document.querySelector('#retries').onchange=e=>selected.retries=+e.target.value;document.querySelectorAll('#tools input').forEach(c=>c.onchange=()=>selected.tools=[...document.querySelectorAll('#tools input:checked')].map(x=>x.value)); }
+async function run(){ const btn=document.querySelector('#run');btn.disabled=true;btn.textContent='Exécution…';for(const n of nodes){const s=document.querySelector(`#s-${n.id}`),r=document.querySelector(`#r-${n.id}`);s.className='status running';r.textContent=n.approval==='always'?'Validation simulée…':'Agent en cours…';await new Promise(ok=>setTimeout(ok,450));s.className='status done';r.textContent={profile:'42 colonnes · 3 alertes',clean:'12 480 lignes validées',explore:'7 facteurs significatifs',baseline:'AUC 0,84 · dérive faible',review:'Preuves validées',report:'Rapport prêt'}[n.id];}btn.disabled=false;btn.textContent='Relancer le workflow';}
+document.querySelector('#run').onclick=run;render();select('profile');
+</script>
+</body>
+</html>
+

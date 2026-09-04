@@ -1,0 +1,87 @@
+{
+  "schema_version": "0.1",
+  "id": "wf_churn_drivers",
+  "name": "Churn drivers analysis",
+  "objective": "Identify churn drivers and produce a validated executive report.",
+  "nodes": [
+    {
+      "id": "profile",
+      "role": "profiler",
+      "depends_on": [],
+      "harness": {
+        "model": "small-structured-model",
+        "tools": ["dataset.read", "profile.compute"],
+        "approval": "never",
+        "max_retries": 1,
+        "timeout_seconds": 180,
+        "network": "deny"
+      }
+    },
+    {
+      "id": "clean",
+      "role": "transformer",
+      "depends_on": ["profile"],
+      "harness": {
+        "model": "coding-model",
+        "tools": ["artifact.read", "python.execute", "artifact.write"],
+        "approval": "before_code_execution",
+        "max_retries": 1,
+        "timeout_seconds": 300,
+        "network": "deny"
+      }
+    },
+    {
+      "id": "explore",
+      "role": "analyst",
+      "depends_on": ["clean"],
+      "harness": {
+        "model": "reasoning-model",
+        "tools": ["artifact.read", "python.execute", "chart.render"],
+        "approval": "before_code_execution",
+        "max_retries": 2,
+        "timeout_seconds": 600,
+        "network": "deny"
+      }
+    },
+    {
+      "id": "baseline",
+      "role": "modeler",
+      "depends_on": ["clean"],
+      "harness": {
+        "model": "coding-model",
+        "tools": ["artifact.read", "python.execute", "model.evaluate"],
+        "approval": "before_code_execution",
+        "max_retries": 2,
+        "timeout_seconds": 900,
+        "network": "deny"
+      }
+    },
+    {
+      "id": "review",
+      "role": "reviewer",
+      "depends_on": ["explore", "baseline"],
+      "harness": {
+        "model": "reasoning-model",
+        "tools": ["artifact.read", "evidence.check"],
+        "approval": "always",
+        "max_retries": 0,
+        "timeout_seconds": 300,
+        "network": "deny"
+      }
+    },
+    {
+      "id": "report",
+      "role": "reporter",
+      "depends_on": ["review"],
+      "harness": {
+        "model": "writing-model",
+        "tools": ["artifact.read", "report.write"],
+        "approval": "never",
+        "max_retries": 1,
+        "timeout_seconds": 300,
+        "network": "deny"
+      }
+    }
+  ]
+}
+

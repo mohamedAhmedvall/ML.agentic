@@ -1,0 +1,9 @@
+[project]
+name = "agentic-data-platform"
+version = "0.1.0"
+description = "Dependency-aware orchestration kernel for an agent-native data science platform"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+

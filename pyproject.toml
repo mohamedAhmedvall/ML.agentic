@@ -1,6 +1,6 @@
 [project]
 name = "ml-agentic"
-version = "0.4.0"
+version = "0.5.0"
 description = "Controlled multi-provider runtime and MCP server for agentic data science"
 requires-python = ">=3.11"
 dependencies = []
@@ -10,10 +10,15 @@ runtime = [
   "mcp>=2,<3",
   "github-copilot-sdk",
 ]
+web = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+]
 
 [project.scripts]
 ml-agentic = "agentic_data.cli:main"
 ml-agentic-mcp = "agentic_data.mcp_server:main"
+ml-agentic-web = "agentic_data.web_app:main"
 
 [tool.ruff]
 line-length = 110

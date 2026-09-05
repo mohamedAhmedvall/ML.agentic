@@ -3,13 +3,22 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 
+AVAILABLE_TOOLS = (
+    "data.inspect_csv",
+    "file.read_text",
+    "file.write_text",
+    "python.run",
+)
+
+
 class ToolGatewayError(RuntimeError):
-    """Raised when a requested tool is unavailable or violates the sandbox policy."""
+    """Raised when a requested tool is unavailable or violates the workspace policy."""
 
 
 @dataclass(frozen=True)
@@ -21,8 +30,9 @@ class ToolResult:
 class ToolGateway:
     """Small deterministic execution gateway for ML.agentic agents.
 
-    The gateway deliberately exposes named capabilities instead of arbitrary shell access.
-    Every filesystem path is resolved below a configured workspace root.
+    Named capabilities are exposed instead of arbitrary shell access. File tools resolve
+    every path below the configured workspace. ``python.run`` executes in that workspace
+    with isolated Python startup, but is not an OS/container security boundary.
     """
 
     def __init__(self, workspace: str | Path):
@@ -58,7 +68,11 @@ class ToolGateway:
         path = self._path(str(args["path"]))
         max_chars = min(max(int(args.get("max_chars", 50_000)), 1), 200_000)
         text = path.read_text(encoding="utf-8")
-        return {"path": str(path.relative_to(self.workspace)), "content": text[:max_chars], "truncated": len(text) > max_chars}
+        return {
+            "path": str(path.relative_to(self.workspace)),
+            "content": text[:max_chars],
+            "truncated": len(text) > max_chars,
+        }
 
     def _write_text(self, args: dict[str, Any]) -> dict[str, Any]:
         path = self._path(str(args["path"]))
@@ -80,7 +94,12 @@ class ToolGateway:
                 total += 1
                 if len(rows) < sample_rows:
                     rows.append(row)
-        return {"path": str(path.relative_to(self.workspace)), "columns": reader.fieldnames or [], "row_count": total, "sample": rows}
+        return {
+            "path": str(path.relative_to(self.workspace)),
+            "columns": reader.fieldnames or [],
+            "row_count": total,
+            "sample": rows,
+        }
 
     def _run_python(self, args: dict[str, Any]) -> dict[str, Any]:
         code = str(args.get("code", ""))
@@ -90,17 +109,19 @@ class ToolGateway:
             raise ToolGatewayError("python code exceeds limit")
         timeout = min(max(int(args.get("timeout_seconds", 30)), 1), 120)
         proc = subprocess.run(
-            ["python", "-I", "-c", code],
+            [sys.executable, "-I", "-c", code],
             cwd=self.workspace,
             capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
         )
-        stdout = proc.stdout[-100_000:]
-        stderr = proc.stderr[-100_000:]
-        return {"returncode": proc.returncode, "stdout": stdout, "stderr": stderr}
+        return {
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-100_000:],
+            "stderr": proc.stderr[-100_000:],
+        }
 
 
-def tool_manifest(gateway: ToolGateway) -> str:
-    return json.dumps({"tools": gateway.tools})
+def tool_manifest() -> str:
+    return json.dumps({"tools": AVAILABLE_TOOLS})

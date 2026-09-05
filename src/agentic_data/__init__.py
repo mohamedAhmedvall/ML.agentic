@@ -1,4 +1,4 @@
-"""Contracts, orchestration and provider adapters for Orbia."""
+"""Contracts, orchestration, tools and provider adapters for ML.agentic."""
 
 from .contracts import AgentNode, Harness, NodeResult, NodeState, Workflow
 from .executor import WorkflowExecutor
@@ -6,10 +6,12 @@ from .providers import MeasurementQuality, ProviderName, ProviderRouter, Provide
 from .run_manager import RunLimits, RunManager
 from .runners import ClaudeAdapter, CodexAdapter, CopilotAdapter, OllamaAdapter
 from .token_budget import ContextPolicy, TokenBudget, TokenBudgetExceeded
+from .tool_gateway import ToolGateway, ToolGatewayError, ToolResult
 
 __all__ = [
     "AgentNode", "Harness", "NodeResult", "NodeState", "Workflow", "WorkflowExecutor",
     "MeasurementQuality", "ProviderName", "ProviderRouter", "ProviderUsage", "TaskKind",
     "RunLimits", "RunManager", "CodexAdapter", "ClaudeAdapter", "CopilotAdapter", "OllamaAdapter",
     "ContextPolicy", "TokenBudget", "TokenBudgetExceeded",
+    "ToolGateway", "ToolGatewayError", "ToolResult",
 ]

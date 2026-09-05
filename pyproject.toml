@@ -1,8 +1,18 @@
 [project]
-name = "agentic-data-platform"
-version = "0.1.0"
-description = "Dependency-aware orchestration kernel for an agent-native data science platform"
+name = "orbia-agentic-data"
+version = "0.2.0"
+description = "Controlled multi-provider runtime and MCP server for agentic data science"
 requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+runtime = [
+  "mcp>=2,<3",
+  "github-copilot-sdk",
+]
+
+[project.scripts]
+orbia-mcp = "agentic_data.mcp_server:main"
 
 [tool.ruff]
 line-length = 110

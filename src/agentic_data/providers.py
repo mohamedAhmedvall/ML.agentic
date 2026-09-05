@@ -6,8 +6,14 @@ from typing import Any, Protocol
 
 
 class ProviderName(StrEnum):
-    OPENAI = "openai"
+    CHATGPT_HOST = "chatgpt_host"
     GITHUB_COPILOT = "github_copilot"
+    OLLAMA = "ollama"
+
+
+class MeasurementQuality(StrEnum):
+    EXACT = "exact"
+    ESTIMATED = "estimated"
 
 
 class TaskKind(StrEnum):
@@ -34,6 +40,7 @@ class ProviderUsage:
     output_tokens: int
     cached_input_tokens: int = 0
     cost_micros: int = 0
+    measurement: MeasurementQuality = MeasurementQuality.EXACT
 
     @property
     def billable_tokens(self) -> int:
@@ -64,18 +71,9 @@ class Route:
 
 
 class ProviderRouter:
-    """Explicit routing policy; no provider choice is hidden in prompts."""
+    """Route explicitly; ChatGPT host is never impersonated by an API adapter."""
 
     def route(self, task: TaskKind) -> Route:
         if task in {TaskKind.CODE_GENERATION, TaskKind.DATA_ANALYSIS}:
-            return Route(
-                primary=ProviderName.GITHUB_COPILOT,
-                fallback=ProviderName.OPENAI,
-                reason="code-oriented task",
-            )
-        return Route(
-            primary=ProviderName.OPENAI,
-            fallback=ProviderName.GITHUB_COPILOT,
-            reason="reasoning or reporting task",
-        )
-
+            return Route(ProviderName.GITHUB_COPILOT, ProviderName.OLLAMA, "code-oriented task")
+        return Route(ProviderName.CHATGPT_HOST, ProviderName.OLLAMA, "host reasoning task")

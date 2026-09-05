@@ -1,8 +1,4 @@
-import sys
 import unittest
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from agentic_data.providers import ProviderName, ProviderRouter, ProviderUsage, TaskKind
 from agentic_data.token_budget import ContextPolicy, TokenBudget, TokenBudgetExceeded
@@ -28,7 +24,8 @@ class TokenBudgetTests(unittest.TestCase):
     def test_provider_routing_is_explicit(self):
         router = ProviderRouter()
         self.assertEqual(router.route(TaskKind.CODE_GENERATION).primary, ProviderName.GITHUB_COPILOT)
-        self.assertEqual(router.route(TaskKind.BUSINESS_REASONING).primary, ProviderName.OPENAI)
+        self.assertEqual(router.route(TaskKind.CODE_GENERATION).fallback, ProviderName.OLLAMA)
+        self.assertEqual(router.route(TaskKind.BUSINESS_REASONING).primary, ProviderName.CHATGPT_HOST)
 
     def test_artifact_context_cannot_be_both_referenced_and_inlined(self):
         with self.assertRaises(ValueError):
@@ -37,4 +34,3 @@ class TokenBudgetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

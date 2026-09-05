@@ -11,8 +11,6 @@ class TokenBudgetExceeded(RuntimeError):
 
 @dataclass
 class TokenBudget:
-    """Hard token and cost boundary shared by every turn in an agent run."""
-
     max_tokens: int
     max_cost_micros: int
     used_tokens: int = 0
@@ -24,9 +22,7 @@ class TokenBudget:
         requested = estimated_input + max_output
         if self.used_tokens + requested > self.max_tokens:
             remaining = max(0, self.max_tokens - self.used_tokens)
-            raise TokenBudgetExceeded(
-                f"turn needs up to {requested} tokens but only {remaining} remain"
-            )
+            raise TokenBudgetExceeded(f"turn needs up to {requested} tokens but only {remaining} remain")
 
     def record(self, usage: ProviderUsage) -> None:
         next_tokens = self.used_tokens + usage.billable_tokens
@@ -44,16 +40,9 @@ class TokenBudget:
     def remaining_tokens(self) -> int:
         return max(0, self.max_tokens - self.used_tokens)
 
-    @property
-    def token_saving_ratio(self) -> float:
-        total_seen = self.used_tokens + self.cached_tokens
-        return self.cached_tokens / total_seen if total_seen else 0.0
-
 
 @dataclass(frozen=True)
 class ContextPolicy:
-    """Controls what enters the next model turn."""
-
     keep_recent_turns: int = 4
     structured_summary_tokens: int = 800
     inline_artifact_bytes: int = 0

@@ -18,6 +18,7 @@ class NodeState(StrEnum):
 @dataclass(frozen=True)
 class Harness:
     model: str
+    provider: str = "chatgpt_host"
     tools: tuple[str, ...] = ()
     approval: str = "never"
     max_retries: int = 0
@@ -25,6 +26,8 @@ class Harness:
     network: str = "deny"
 
     def __post_init__(self) -> None:
+        if self.provider not in {"chatgpt_host", "github_copilot", "ollama"}:
+            raise ValueError("unsupported provider")
         if self.max_retries < 0:
             raise ValueError("max_retries must be positive")
         if self.timeout_seconds <= 0:

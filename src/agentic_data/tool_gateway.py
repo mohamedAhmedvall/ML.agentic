@@ -125,3 +125,45 @@ class ToolGateway:
 
 def tool_manifest() -> str:
     return json.dumps({"tools": AVAILABLE_TOOLS})
+
+
+class DockerToolGateway(ToolGateway):
+    """Python execution for the local web runner; never falls back to host Python."""
+
+    def _run_python(self, args: dict[str, Any]) -> dict[str, Any]:
+        import os
+        import shutil
+        import uuid
+        code = str(args.get('code', ''))
+        if not code.strip() or len(code) > 100_000:
+            raise ToolGatewayError('Python code must contain 1 to 100000 characters')
+        if not shutil.which('docker'):
+            raise ToolGatewayError('Docker is required for Python execution from the dashboard')
+        timeout = min(max(int(args.get('timeout_seconds', 30)), 1), 120)
+        name = 'ml-agentic-' + uuid.uuid4().hex
+        # Output files live on the bounded container tmpfs, never in host memory.
+        wrapper = '''import json,subprocess,sys,tempfile
+with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+ p=subprocess.run([sys.executable,'-I','-c',sys.stdin.read()],stdout=out,stderr=err)
+ def tail(f):
+  f.seek(0,2); f.seek(max(0,f.tell()-100000)); return f.read().decode('utf-8','replace')
+ print(json.dumps(dict(returncode=p.returncode,stdout=tail(out),stderr=tail(err))))
+'''
+        command = ['docker', 'run', '--rm', '--pull=never', '--name', name, '-i',
+                   '--network=none', '--read-only', '--cap-drop=ALL',
+                   '--security-opt=no-new-privileges', '--memory=512m', '--cpus=1',
+                   '--pids-limit=64', '--ulimit=fsize=16777216:16777216',
+                   '--tmpfs=/tmp:rw,nosuid,noexec,size=64m',
+                   '--user', f'{os.getuid()}:{os.getgid()}',
+                   '--mount', f'type=bind,source={self.workspace},target=/workspace',
+                   '--workdir=/workspace', os.environ.get('ML_AGENTIC_PYTHON_IMAGE', 'python:3.12-slim'),
+                   'python', '-I', '-c', wrapper]
+        try:
+            result = subprocess.run(command, input=code, text=True, capture_output=True, timeout=timeout)
+            if result.returncode:
+                raise ToolGatewayError('Docker execution failed: ' + result.stderr[-2000:])
+            return json.loads(result.stdout)
+        except subprocess.TimeoutExpired as exc:
+            raise ToolGatewayError('Python execution timed out') from exc
+        finally:
+            subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=10, check=False)

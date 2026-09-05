@@ -19,7 +19,7 @@ class RunLimits:
 class ManagedRun:
     id:str; workflow:Workflow; limits:RunLimits; budget:TokenBudget; workspace:Path; results:dict[str,NodeResult]=field(default_factory=dict); model_turns:int=0; approvals:set[str]=field(default_factory=set); default_provider:ProviderName=ProviderName.OPENAI_CODEX
 class RunManager:
-    def __init__(self,adapters:dict[ProviderName,Any],workspace_root:str|Path=".ml-agentic/runs",event_bus:EventBus|None=None): self.adapters=adapters;self.runs={};self.workspace_root=Path(workspace_root);self.events=event_bus or EventBus()
+    def __init__(self,adapters:dict[ProviderName,Any],workspace_root:str|Path=".ml-agentic/runs",event_bus:EventBus|None=None,gateway_factory=None): self.gateway_factory=gateway_factory or ToolGateway;self.adapters=adapters;self.runs={};self.workspace_root=Path(workspace_root);self.events=event_bus or EventBus()
     def start(self,workflow:Workflow,limits:RunLimits|None=None,default_provider:ProviderName=ProviderName.OPENAI_CODEX)->ManagedRun:
         workflow.node_map();self._assert_acyclic(workflow);limits=limits or RunLimits();rid=f"run_{uuid.uuid4().hex[:12]}";ws=self.workspace_root/rid;ws.mkdir(parents=True,exist_ok=True);run=ManagedRun(rid,workflow,limits,TokenBudget(limits.max_tokens,limits.max_cost_micros),ws,default_provider=default_provider);self.runs[rid]=run
         self.events.emit("run.started",rid,{"workflow_id":workflow.id,"objective":workflow.objective,"nodes":[{"id":n.id,"role":n.role,"depends_on":list(n.depends_on),"provider":n.harness.provider,"model":n.harness.model,"tools":list(n.harness.tools),"approval":n.harness.approval} for n in workflow.nodes],"provider":default_provider.value});return run
@@ -39,7 +39,7 @@ class RunManager:
         if node.harness.approval!="never" and node_id not in run.approvals:self.events.emit("agent.awaiting_approval",run.id,{"role":node.role,"policy":node.harness.approval},node_id=node.id);return {"status":"approval_required","node_id":node_id,"policy":node.harness.approval}
         provider=run.default_provider if node.harness.provider=="auto" else ProviderName(node.harness.provider);candidates=[provider]
         if node.harness.fallback_provider:candidates.append(ProviderName(node.harness.fallback_provider))
-        self.events.emit("agent.started",run.id,{"role":node.role,"provider":provider.value,"model":node.harness.model,"depends_on":list(node.depends_on),"tools":list(node.harness.tools)},node_id=node.id);gateway=ToolGateway(run.workspace);history=[];calls=0
+        self.events.emit("agent.started",run.id,{"role":node.role,"provider":provider.value,"model":node.harness.model,"depends_on":list(node.depends_on),"tools":list(node.harness.tools)},node_id=node.id);gateway=self.gateway_factory(run.workspace);history=[];calls=0
         while True:
             if run.model_turns>=run.limits.max_model_turns:self.events.emit("agent.failed",run.id,{"role":node.role,"error":"model turn limit reached"},node_id=node.id);raise RuntimeError("model turn limit reached")
             req=self.prepare(run_id,node_id,history);run.budget.assert_capacity(estimate_request(req),req.max_output_tokens);run.model_turns+=1;response=None;last=None;selected=None

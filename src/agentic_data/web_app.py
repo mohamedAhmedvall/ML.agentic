@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio, json
+import os
 from pathlib import Path
 from typing import Any
 from .artifacts import ArtifactRegistry
@@ -25,19 +26,64 @@ def project_snapshot(project_path:str|Path)->dict[str,Any]:
     datasets=[{"name":p.name,"path":str(p.relative_to(project.root)),"size_bytes":p.stat().st_size} for p in sorted(project.datasets_dir.iterdir()) if p.is_file()] if project.datasets_dir.exists() else []
     return {"project":{"id":project.id,"name":project.name,"path":str(project.root)},"datasets":datasets,"runs":runs,"events":_read_events(project.events_file),"artifacts":ArtifactRegistry(project.root).list()}
 
-async def _event_stream(project_path:str):
-    project=ProjectStore().open(project_path); f=project.events_file; pos=f.stat().st_size if f.is_file() else 0
+class EventTail:
+    """Read complete JSONL records using byte offsets; retain unfinished writes."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.position = 0
+        self.identity = None
+        if path.is_file():
+            stat = path.stat()
+            self.identity = (stat.st_dev, stat.st_ino)
+            # Start after the last complete record, retaining only a partial tail.
+            with path.open("rb") as handle:
+                end = stat.st_size
+                while end:
+                    start = max(0, end - 8192)
+                    handle.seek(start)
+                    index = handle.read(end - start).rfind(b"\n")
+                    if index >= 0:
+                        self.position = start + index + 1
+                        break
+                    end = start
+
+    def read(self) -> list[dict[str, Any]]:
+        events = []
+        try:
+            handle = self.path.open("rb")
+        except FileNotFoundError:
+            return events
+        with handle:
+            stat = os.fstat(handle.fileno())
+            identity = (stat.st_dev, stat.st_ino)
+            if identity != self.identity or stat.st_size < self.position:
+                self.position = 0
+            self.identity = identity
+            handle.seek(self.position)
+            while True:
+                line = handle.readline()
+                if not line or not line.endswith(b"\n"):
+                    break
+                self.position = handle.tell()
+                try:
+                    event = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if isinstance(event, dict):
+                    events.append(event)
+        return events
+
+
+async def _event_stream(project_path: str):
+    project = ProjectStore().open(project_path)
+    tail = EventTail(project.events_file)
     yield "event: ready\ndata: {}\n\n"
     while True:
-        if f.is_file() and f.stat().st_size>pos:
-            with f.open("r",encoding="utf-8") as h:
-                h.seek(pos)
-                for line in h:
-                    try:
-                        if line.strip(): yield f"event: runtime\ndata: {json.dumps(json.loads(line),ensure_ascii=False)}\n\n"
-                    except json.JSONDecodeError: pass
-                pos=h.tell()
-        yield ": keepalive\n\n"; await asyncio.sleep(.75)
+        for event in tail.read():
+            yield f"event: runtime\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        yield ": keepalive\n\n"
+        await asyncio.sleep(.75)
 
 def build_app():
     try:

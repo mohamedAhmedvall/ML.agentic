@@ -9,8 +9,8 @@
       "role": "business_framer",
       "depends_on": [],
       "harness": {
-        "provider": "chatgpt_host",
-        "model": "current-chatgpt-model",
+        "provider": "auto",
+        "model": "auto",
         "tools": ["artifact.read"],
         "approval": "never",
         "max_retries": 0,
@@ -24,6 +24,7 @@
       "depends_on": ["frame"],
       "harness": {
         "provider": "github_copilot",
+        "fallback_provider": "ollama",
         "model": "auto",
         "tools": ["artifact.read", "python.execute", "artifact.write"],
         "approval": "before_code_execution",

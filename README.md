@@ -1,11 +1,12 @@
 # Orbia — Agentic Data Platform
 
-Orbia is an agent-native data science workspace. ChatGPT can be the reasoning host through the user's existing subscription; Orbia does **not** reuse browser cookies and does **not** require an OpenAI API key.
+Orbia is an agent-native data science workspace. Its deterministic control plane—not a model provider—owns dependencies, budgets, approvals and run state. The user presents a problem, selects a default provider, and Orbia lets the agents execute the resulting DAG autonomously.
 
 ## Working MVP
 
 - Dependency-aware workflow DAG.
-- MCP tools for starting a run, requesting the next agent, recording ChatGPT-hosted results and inspecting status.
+- MCP tools for starting a run, executing one agent, running autonomously and inspecting status.
+- Four peer providers: Codex with ChatGPT subscription sign-in, GitHub Copilot, Claude Code and Ollama.
 - Real local Ollama adapter through `POST /api/chat`.
 - Real GitHub Copilot SDK adapter using the locally signed-in Copilot user.
 - Per-run token and model-turn limits.
@@ -29,7 +30,14 @@ pip install -e ".[runtime]"
 python -m copilot download-runtime
 ```
 
-Sign in to GitHub Copilot once with the Copilot CLI. For Ollama, start the local service and pull the model configured in the workflow.
+Authenticate only the providers you want to expose on the runner:
+
+```bash
+codex login
+claude auth login
+```
+
+Sign in to GitHub Copilot once with the Copilot CLI. For Ollama, start the local service and pull the model configured in the workflow. No credential belongs in workflow JSON.
 
 ## Start the MCP server
 
@@ -45,7 +53,15 @@ Streamable HTTP for ChatGPT/plugin development:
 mcp run src/agentic_data/mcp_server.py --transport streamable-http
 ```
 
-Connect the resulting `/mcp` endpoint to ChatGPT. ChatGPT executes `chatgpt_host` nodes in the current subscription session; `github_copilot` and `ollama` nodes run on the machine hosting Orbia.
+MCP is an optional control interface, not the orchestrator. A UI or any compatible client can call `start_workflow`, then `run_autonomous`. Nodes configured with `auto` use the provider selected when the run starts; individual nodes can override it and declare a fallback.
+
+## Global operation
+
+1. The user describes the business/data problem and selects a provider.
+2. A planner produces a validated workflow DAG (the MVP can also accept a saved DAG directly).
+3. The scheduler releases nodes whose dependencies are satisfied.
+4. Each agent receives only its role, dependency outputs, allowed tools and budget.
+5. Orbia continues until the DAG completes, a human gate is reached, a provider fails without fallback, or a hard budget is exhausted.
 
 ## Security defaults
 

@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .contracts import AgentNode, NodeResult, NodeState, Workflow
-from .providers import MeasurementQuality, ProviderName, ProviderRequest, ProviderUsage
-from .runners import HostExecutionRequired
+from .providers import ProviderName, ProviderRequest
+from .runners import ProviderUnavailable
 from .token_budget import TokenBudget
 
 
@@ -26,6 +26,7 @@ class ManagedRun:
     results: dict[str, NodeResult] = field(default_factory=dict)
     model_turns: int = 0
     approvals: set[str] = field(default_factory=set)
+    default_provider: ProviderName = ProviderName.OPENAI_CODEX
 
 
 class RunManager:
@@ -33,7 +34,12 @@ class RunManager:
         self.adapters = adapters
         self.runs: dict[str, ManagedRun] = {}
 
-    def start(self, workflow: Workflow, limits: RunLimits | None = None) -> ManagedRun:
+    def start(
+        self,
+        workflow: Workflow,
+        limits: RunLimits | None = None,
+        default_provider: ProviderName = ProviderName.OPENAI_CODEX,
+    ) -> ManagedRun:
         workflow.node_map()
         self._assert_acyclic(workflow)
         limits = limits or RunLimits()
@@ -42,6 +48,7 @@ class RunManager:
             workflow=workflow,
             limits=limits,
             budget=TokenBudget(limits.max_tokens, limits.max_cost_micros),
+            default_provider=default_provider,
         )
         self.runs[run.id] = run
         return run
@@ -80,37 +87,48 @@ class RunManager:
         node = next(node for node in run.workflow.nodes if node.id == node_id)
         if node.harness.approval != "never" and node_id not in run.approvals:
             return {"status": "approval_required", "node_id": node_id, "policy": node.harness.approval}
-        provider = ProviderName(node.harness.provider)
+        provider = run.default_provider if node.harness.provider == "auto" else ProviderName(node.harness.provider)
         request = self.prepare(run_id, node_id)
         run.budget.assert_capacity(estimate_request(request), request.max_output_tokens)
         run.model_turns += 1
-        try:
-            response = self.adapters[provider].invoke(request)
-        except HostExecutionRequired:
-            return {
-                "status": "host_turn_required",
-                "provider": provider,
-                "instructions": request.instructions,
-                "input": request.input,
-                "max_output_tokens": request.max_output_tokens,
-            }
+        candidates = [provider]
+        if node.harness.fallback_provider:
+            candidates.append(ProviderName(node.harness.fallback_provider))
+        last_error = None
+        for candidate in candidates:
+            try:
+                response = self.adapters[candidate].invoke(request)
+                break
+            except (ProviderUnavailable, KeyError) as exc:
+                last_error = exc
+        else:
+            run.results[node_id] = NodeResult(node_id, NodeState.FAILED, error=str(last_error))
+            return {"status": "failed", "node_id": node_id, "error": str(last_error)}
         run.budget.record(response.usage)
         run.results[node_id] = NodeResult(node_id, NodeState.SUCCEEDED, response.output)
         return {"status": "succeeded", "output": response.output, "usage": usage_dict(response.usage)}
 
-    def complete_host(
-        self, run_id: str, node_id: str, output: dict[str, Any], input_tokens: int, output_tokens: int
-    ) -> None:
-        run = self.runs[run_id]
-        if node_id not in {node.id for node in self.ready(run_id)}:
-            raise ValueError("node is not ready")
-        usage = ProviderUsage(
-            input_tokens=max(128, input_tokens),
-            output_tokens=max(1, output_tokens or (len(str(output)) + 3) // 4),
-            measurement=MeasurementQuality.ESTIMATED,
-        )
-        run.budget.record(usage)
-        run.results[node_id] = NodeResult(node_id, NodeState.SUCCEEDED, output)
+    def execute_until_blocked(self, run_id: str) -> dict[str, Any]:
+        """Run every ready node until completion, approval, failure or a hard limit."""
+        while True:
+            ready = self.ready(run_id)
+            if not ready:
+                run = self.runs[run_id]
+                failed = [node_id for node_id, result in run.results.items() if result.state == NodeState.FAILED]
+                done = len(run.results) == len(run.workflow.nodes) and not failed
+                return {"status": "completed" if done else "failed", "failed": failed}
+            progressed = False
+            approvals = []
+            for node in ready:
+                result = self.execute(run_id, node.id)
+                if result["status"] == "approval_required":
+                    approvals.append(node.id)
+                else:
+                    progressed = True
+                if result["status"] == "failed":
+                    return result
+            if approvals and not progressed:
+                return {"status": "approval_required", "nodes": approvals}
 
     def approve(self, run_id: str, node_id: str) -> None:
         run = self.runs[run_id]

@@ -9,14 +9,15 @@ from mcp.server import MCPServer
 from .contracts import AgentNode, Harness, Workflow
 from .providers import ProviderName
 from .run_manager import RunLimits, RunManager
-from .runners import ChatGPTHostAdapter, CopilotAdapter, OllamaAdapter
+from .runners import ClaudeAdapter, CodexAdapter, CopilotAdapter, OllamaAdapter
 
 
 mcp = MCPServer("Orbia Agentic Data Platform")
 manager = RunManager(
     {
-        ProviderName.CHATGPT_HOST: ChatGPTHostAdapter(),
+        ProviderName.OPENAI_CODEX: CodexAdapter(),
         ProviderName.GITHUB_COPILOT: CopilotAdapter(),
+        ProviderName.ANTHROPIC_CLAUDE: ClaudeAdapter(),
         ProviderName.OLLAMA: OllamaAdapter(os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")),
     }
 )
@@ -34,7 +35,8 @@ def parse_workflow(raw: str) -> Workflow:
                 depends_on=tuple(item.get("depends_on", [])),
                 harness=Harness(
                     model=config.get("model", "auto"),
-                    provider=config.get("provider", "chatgpt_host"),
+                    provider=config.get("provider", "auto"),
+                    fallback_provider=config.get("fallback_provider"),
                     tools=tuple(config.get("tools", [])),
                     approval=config.get("approval", "never"),
                     max_retries=int(config.get("max_retries", 0)),
@@ -51,8 +53,9 @@ def platform_manifest() -> dict[str, Any]:
     """Return Orbia's providers and non-negotiable execution boundaries."""
     return {
         "providers": {
-            "chatgpt_host": "current ChatGPT subscription session; no OpenAI API key",
+            "openai_codex": "local Codex CLI using ChatGPT subscription authentication",
             "github_copilot": "local GitHub Copilot SDK using the signed-in subscriber",
+            "anthropic_claude": "local Claude Code CLI using Anthropic authentication",
             "ollama": "local Ollama HTTP runtime",
         },
         "boundaries": [
@@ -66,42 +69,39 @@ def platform_manifest() -> dict[str, Any]:
 
 
 @mcp.tool()
-def start_workflow(workflow_json: str, max_tokens: int = 24000, max_model_turns: int = 12) -> dict:
+def start_workflow(
+    workflow_json: str,
+    provider: str = "openai_codex",
+    max_tokens: int = 24000,
+    max_model_turns: int = 12,
+) -> dict:
     """Validate a workflow and start a controlled run. Returns the first ready agents."""
     workflow = parse_workflow(workflow_json)
-    run = manager.start(workflow, RunLimits(max_tokens=max_tokens, max_model_turns=max_model_turns))
+    run = manager.start(
+        workflow,
+        RunLimits(max_tokens=max_tokens, max_model_turns=max_model_turns),
+        default_provider=ProviderName(provider),
+    )
     return {"run_id": run.id, "ready": [node.id for node in manager.ready(run.id)]}
 
 
 @mcp.tool()
 def run_agent(run_id: str, node_id: str) -> dict:
-    """Execute one ready agent through Copilot/Ollama or prepare a ChatGPT-hosted turn."""
+    """Execute one ready agent with its configured provider."""
     return manager.execute(run_id, node_id)
+
+
+@mcp.tool()
+def run_autonomous(run_id: str) -> dict:
+    """Let Orbia execute the DAG until completion, approval, failure or a hard limit."""
+    outcome = manager.execute_until_blocked(run_id)
+    return {**outcome, **_run_status(run_id)}
 
 
 @mcp.tool()
 def approve_agent(run_id: str, node_id: str) -> dict:
     """Approve one ready agent whose harness requires human validation."""
     manager.approve(run_id, node_id)
-    return _run_status(run_id)
-
-
-@mcp.tool()
-def record_agent_result(
-    run_id: str,
-    node_id: str,
-    output_json: str,
-    estimated_input_tokens: int = 0,
-    estimated_output_tokens: int = 0,
-) -> dict:
-    """Record a structured result produced by the current ChatGPT host turn."""
-    manager.complete_host(
-        run_id,
-        node_id,
-        json.loads(output_json),
-        estimated_input_tokens,
-        estimated_output_tokens,
-    )
     return _run_status(run_id)
 
 

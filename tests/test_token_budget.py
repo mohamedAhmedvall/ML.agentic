@@ -23,9 +23,9 @@ class TokenBudgetTests(unittest.TestCase):
 
     def test_provider_routing_is_explicit(self):
         router = ProviderRouter()
-        self.assertEqual(router.route(TaskKind.CODE_GENERATION).primary, ProviderName.GITHUB_COPILOT)
-        self.assertEqual(router.route(TaskKind.CODE_GENERATION).fallback, ProviderName.OLLAMA)
-        self.assertEqual(router.route(TaskKind.BUSINESS_REASONING).primary, ProviderName.CHATGPT_HOST)
+        route = router.route(TaskKind.CODE_GENERATION, ProviderName.ANTHROPIC_CLAUDE)
+        self.assertEqual(route.primary, ProviderName.ANTHROPIC_CLAUDE)
+        self.assertEqual(route.fallback, ProviderName.OLLAMA)
 
     def test_artifact_context_cannot_be_both_referenced_and_inlined(self):
         with self.assertRaises(ValueError):

@@ -18,7 +18,8 @@ class NodeState(StrEnum):
 @dataclass(frozen=True)
 class Harness:
     model: str
-    provider: str = "chatgpt_host"
+    provider: str = "auto"
+    fallback_provider: str | None = None
     tools: tuple[str, ...] = ()
     approval: str = "never"
     max_retries: int = 0
@@ -26,8 +27,11 @@ class Harness:
     network: str = "deny"
 
     def __post_init__(self) -> None:
-        if self.provider not in {"chatgpt_host", "github_copilot", "ollama"}:
+        supported = {"auto", "openai_codex", "github_copilot", "anthropic_claude", "ollama"}
+        if self.provider not in supported:
             raise ValueError("unsupported provider")
+        if self.fallback_provider is not None and self.fallback_provider not in supported - {"auto"}:
+            raise ValueError("unsupported fallback provider")
         if self.max_retries < 0:
             raise ValueError("max_retries must be positive")
         if self.timeout_seconds <= 0:
@@ -68,4 +72,3 @@ class NodeResult:
     output: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     attempts: int = 1
-

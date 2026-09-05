@@ -6,8 +6,9 @@ from typing import Any, Protocol
 
 
 class ProviderName(StrEnum):
-    CHATGPT_HOST = "chatgpt_host"
+    OPENAI_CODEX = "openai_codex"
     GITHUB_COPILOT = "github_copilot"
+    ANTHROPIC_CLAUDE = "anthropic_claude"
     OLLAMA = "ollama"
 
 
@@ -71,9 +72,11 @@ class Route:
 
 
 class ProviderRouter:
-    """Route explicitly; ChatGPT host is never impersonated by an API adapter."""
+    """Optional auto-routing policy. Orbia remains the orchestrator."""
 
-    def route(self, task: TaskKind) -> Route:
+    def route(self, task: TaskKind, default: ProviderName) -> Route:
         if task in {TaskKind.CODE_GENERATION, TaskKind.DATA_ANALYSIS}:
-            return Route(ProviderName.GITHUB_COPILOT, ProviderName.OLLAMA, "code-oriented task")
-        return Route(ProviderName.CHATGPT_HOST, ProviderName.OLLAMA, "host reasoning task")
+            fallback = ProviderName.OLLAMA if default != ProviderName.OLLAMA else ProviderName.GITHUB_COPILOT
+            return Route(default, fallback, "user-selected provider; local fallback")
+        fallback = ProviderName.OLLAMA if default != ProviderName.OLLAMA else ProviderName.OPENAI_CODEX
+        return Route(default, fallback, "user-selected provider")

@@ -1,18 +1,18 @@
 import json
 import unittest
 
-from runtime_impl.contracts import AgentNode, Harness, NodeState, Workflow
-from runtime_impl.providers import ProviderName, ProviderRequest, ProviderResponse, ProviderUsage
-from runtime_impl.run_manager import RunLimits, RunManager
-from runtime_impl.runners import ChatGPTHostAdapter
-
-
+from agentic_data.contracts import AgentNode, Harness, NodeState, Workflow
+from agentic_data.providers import ProviderName, ProviderRequest, ProviderResponse, ProviderUsage
+from agentic_data.run_manager import RunLimits, RunManager
 class FakeAdapter:
+    def __init__(self, provider=ProviderName.OLLAMA):
+        self.provider = provider
+
     def invoke(self, request: ProviderRequest) -> ProviderResponse:
         return ProviderResponse(
             output={"model": request.model},
             usage=ProviderUsage(100, 50),
-            provider=ProviderName.OLLAMA,
+            provider=self.provider,
             model=request.model,
         )
 
@@ -23,7 +23,7 @@ class RuntimeTests(unittest.TestCase):
             "demo",
             "predict churn",
             (
-                AgentNode("frame", "framer", harness=Harness("host", provider="chatgpt_host")),
+                AgentNode("frame", "framer", harness=Harness("auto", provider="auto")),
                 AgentNode(
                     "train",
                     "modeler",
@@ -33,18 +33,19 @@ class RuntimeTests(unittest.TestCase):
             ),
         )
 
-    def test_host_turn_then_local_turn(self):
+    def test_selected_provider_runs_entire_workflow(self):
         manager = RunManager(
-            {ProviderName.CHATGPT_HOST: ChatGPTHostAdapter(), ProviderName.OLLAMA: FakeAdapter()}
+            {ProviderName.ANTHROPIC_CLAUDE: FakeAdapter(ProviderName.ANTHROPIC_CLAUDE), ProviderName.OLLAMA: FakeAdapter()}
         )
-        run = manager.start(self.workflow(), RunLimits(max_tokens=5000, max_model_turns=3))
-        envelope = manager.execute(run.id, "frame")
-        self.assertEqual(envelope["status"], "host_turn_required")
-        manager.complete_host(run.id, "frame", {"metric": "recall"}, 80, 20)
-        result = manager.execute(run.id, "train")
-        self.assertEqual(result["status"], "succeeded")
+        run = manager.start(
+            self.workflow(), RunLimits(max_tokens=5000, max_model_turns=3),
+            default_provider=ProviderName.ANTHROPIC_CLAUDE,
+        )
+        result = manager.execute_until_blocked(run.id)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(run.results["frame"].state, NodeState.SUCCEEDED)
         self.assertEqual(run.results["train"].state, NodeState.SUCCEEDED)
-        self.assertEqual(run.budget.used_tokens, 298)
+        self.assertEqual(run.budget.used_tokens, 300)
 
     def test_approval_gate_blocks_execution(self):
         workflow = Workflow(
@@ -59,11 +60,11 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(manager.execute(run.id, "deploy")["status"], "succeeded")
 
     def test_model_turn_limit_is_hard(self):
-        manager = RunManager({ProviderName.CHATGPT_HOST: ChatGPTHostAdapter()})
+        manager = RunManager({ProviderName.OPENAI_CODEX: FakeAdapter(ProviderName.OPENAI_CODEX)})
         run = manager.start(self.workflow(), RunLimits(max_tokens=5000, max_model_turns=1))
         manager.execute(run.id, "frame")
         with self.assertRaisesRegex(RuntimeError, "limit"):
-            manager.execute(run.id, "frame")
+            manager.execute(run.id, "train")
 
     def test_cycle_is_rejected(self):
         workflow = Workflow(

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import AgentNode, NodeResult, NodeState, Workflow
+from .events import EventBus
 from .providers import ProviderName, ProviderRequest, ProviderUsage
 from .runners import ProviderUnavailable
 from .token_budget import TokenBudget
@@ -34,10 +35,16 @@ class ManagedRun:
 
 
 class RunManager:
-    def __init__(self, adapters: dict[ProviderName, Any], workspace_root: str | Path = ".ml-agentic/runs"):
+    def __init__(
+        self,
+        adapters: dict[ProviderName, Any],
+        workspace_root: str | Path = ".ml-agentic/runs",
+        event_bus: EventBus | None = None,
+    ):
         self.adapters = adapters
         self.runs: dict[str, ManagedRun] = {}
         self.workspace_root = Path(workspace_root)
+        self.events = event_bus or EventBus()
 
     def start(
         self,
@@ -60,6 +67,16 @@ class RunManager:
             default_provider=default_provider,
         )
         self.runs[run.id] = run
+        self.events.emit(
+            "run.started",
+            run.id,
+            {
+                "workflow_id": workflow.id,
+                "objective": workflow.objective,
+                "nodes": [node.id for node in workflow.nodes],
+                "provider": default_provider.value,
+            },
+        )
         return run
 
     def ready(self, run_id: str) -> list[AgentNode]:
@@ -71,6 +88,12 @@ class RunManager:
             deps = [run.results.get(dep) for dep in node.depends_on]
             if any(dep and dep.state != NodeState.SUCCEEDED for dep in deps):
                 run.results[node.id] = NodeResult(node.id, NodeState.SKIPPED)
+                self.events.emit(
+                    "agent.skipped",
+                    run.id,
+                    {"role": node.role, "reason": "dependency did not succeed"},
+                    node_id=node.id,
+                )
             elif all(dep is not None for dep in deps):
                 ready.append(node)
         return ready
@@ -109,6 +132,12 @@ class RunManager:
         run = self.runs[run_id]
         node = next(node for node in run.workflow.nodes if node.id == node_id)
         if node.harness.approval != "never" and node_id not in run.approvals:
+            self.events.emit(
+                "agent.awaiting_approval",
+                run.id,
+                {"role": node.role, "policy": node.harness.approval},
+                node_id=node.id,
+            )
             return {"status": "approval_required", "node_id": node_id, "policy": node.harness.approval}
 
         provider = run.default_provider if node.harness.provider == "auto" else ProviderName(node.harness.provider)
@@ -116,12 +145,30 @@ class RunManager:
         if node.harness.fallback_provider:
             candidates.append(ProviderName(node.harness.fallback_provider))
 
+        self.events.emit(
+            "agent.started",
+            run.id,
+            {
+                "role": node.role,
+                "provider": provider.value,
+                "model": node.harness.model,
+                "depends_on": list(node.depends_on),
+                "tools": list(node.harness.tools),
+            },
+            node_id=node.id,
+        )
         gateway = ToolGateway(run.workspace)
         tool_history: list[dict[str, Any]] = []
         tool_calls = 0
 
         while True:
             if run.model_turns >= run.limits.max_model_turns:
+                self.events.emit(
+                    "agent.failed",
+                    run.id,
+                    {"role": node.role, "error": "model turn limit reached"},
+                    node_id=node.id,
+                )
                 raise RuntimeError("model turn limit reached")
             request = self.prepare(run_id, node_id, tool_history)
             run.budget.assert_capacity(estimate_request(request), request.max_output_tokens)
@@ -129,20 +176,50 @@ class RunManager:
 
             response = None
             last_error = None
+            selected_provider = None
             for candidate in candidates:
                 try:
                     response = self.adapters[candidate].invoke(request)
+                    selected_provider = candidate
                     break
                 except (ProviderUnavailable, KeyError) as exc:
                     last_error = exc
             if response is None:
-                run.results[node_id] = NodeResult(node_id, NodeState.FAILED, error=str(last_error))
-                return {"status": "failed", "node_id": node_id, "error": str(last_error)}
+                error = str(last_error)
+                run.results[node_id] = NodeResult(node_id, NodeState.FAILED, error=error)
+                self.events.emit(
+                    "agent.failed",
+                    run.id,
+                    {"role": node.role, "error": error},
+                    node_id=node.id,
+                )
+                return {"status": "failed", "node_id": node_id, "error": error}
 
             run.budget.record(response.usage)
+            self.events.emit(
+                "model.turn.completed",
+                run.id,
+                {
+                    "provider": selected_provider.value if selected_provider else response.provider.value,
+                    "model": response.model,
+                    "usage": usage_dict(response.usage),
+                    "turn": run.model_turns,
+                },
+                node_id=node.id,
+            )
             call = response.output.get("tool_call") if isinstance(response.output, dict) else None
             if not isinstance(call, dict):
                 run.results[node_id] = NodeResult(node_id, NodeState.SUCCEEDED, response.output)
+                self.events.emit(
+                    "agent.completed",
+                    run.id,
+                    {
+                        "role": node.role,
+                        "output": response.output,
+                        "tool_calls": tool_calls,
+                    },
+                    node_id=node.id,
+                )
                 return {
                     "status": "succeeded",
                     "output": response.output,
@@ -154,6 +231,7 @@ class RunManager:
             if tool_calls > run.limits.max_tool_calls_per_agent:
                 error = "tool call limit reached"
                 run.results[node_id] = NodeResult(node_id, NodeState.FAILED, error=error)
+                self.events.emit("agent.failed", run.id, {"role": node.role, "error": error}, node_id=node.id)
                 return {"status": "failed", "node_id": node_id, "error": error}
 
             name = call.get("name")
@@ -161,18 +239,49 @@ class RunManager:
             if not isinstance(name, str) or not isinstance(arguments, dict):
                 error = "invalid tool_call payload"
                 run.results[node_id] = NodeResult(node_id, NodeState.FAILED, error=error)
+                self.events.emit("agent.failed", run.id, {"role": node.role, "error": error}, node_id=node.id)
                 return {"status": "failed", "node_id": node_id, "error": error}
             if name not in node.harness.tools:
                 error = f"tool not allowed for agent: {name}"
                 run.results[node_id] = NodeResult(node_id, NodeState.FAILED, error=error)
+                self.events.emit("agent.failed", run.id, {"role": node.role, "error": error}, node_id=node.id)
                 return {"status": "failed", "node_id": node_id, "error": error}
 
+            self.events.emit(
+                "tool.called",
+                run.id,
+                {"tool": name, "arguments": arguments, "call_index": tool_calls},
+                node_id=node.id,
+            )
+            before = _workspace_files(run.workspace)
             try:
                 tool_result = gateway.execute(name, arguments)
             except (ToolGatewayError, OSError, ValueError, KeyError) as exc:
                 error = f"tool execution failed: {exc}"
                 run.results[node_id] = NodeResult(node_id, NodeState.FAILED, error=error)
+                self.events.emit(
+                    "tool.failed",
+                    run.id,
+                    {"tool": name, "error": str(exc), "call_index": tool_calls},
+                    node_id=node.id,
+                )
+                self.events.emit("agent.failed", run.id, {"role": node.role, "error": error}, node_id=node.id)
                 return {"status": "failed", "node_id": node_id, "error": error}
+
+            self.events.emit(
+                "tool.completed",
+                run.id,
+                {"tool": name, "result": tool_result.output, "call_index": tool_calls},
+                node_id=node.id,
+            )
+            after = _workspace_files(run.workspace)
+            for artifact in sorted(after - before):
+                self.events.emit(
+                    "artifact.created",
+                    run.id,
+                    {"path": artifact, "created_by": node.id, "tool": name},
+                    node_id=node.id,
+                )
 
             tool_history.append(
                 {
@@ -190,7 +299,17 @@ class RunManager:
                 run = self.runs[run_id]
                 failed = [node_id for node_id, result in run.results.items() if result.state == NodeState.FAILED]
                 done = len(run.results) == len(run.workflow.nodes) and not failed
-                return {"status": "completed" if done else "failed", "failed": failed}
+                status = "completed" if done else "failed"
+                self.events.emit(
+                    f"run.{status}",
+                    run.id,
+                    {
+                        "failed": failed,
+                        "model_turns": run.model_turns,
+                        "used_tokens": run.budget.used_tokens,
+                    },
+                )
+                return {"status": status, "failed": failed}
             progressed = False
             approvals = []
             for node in ready:
@@ -200,8 +319,10 @@ class RunManager:
                 else:
                     progressed = True
                 if result["status"] == "failed":
+                    self.events.emit("run.failed", run_id, {"failed": [node.id], "error": result.get("error")})
                     return result
             if approvals and not progressed:
+                self.events.emit("run.awaiting_approval", run_id, {"nodes": approvals})
                 return {"status": "approval_required", "nodes": approvals}
 
     def approve(self, run_id: str, node_id: str) -> None:
@@ -209,6 +330,7 @@ class RunManager:
         if node_id not in {node.id for node in self.ready(run_id)}:
             raise ValueError("node is not ready")
         run.approvals.add(node_id)
+        self.events.emit("agent.approved", run.id, {}, node_id=node_id)
 
     @staticmethod
     def _assert_acyclic(workflow: Workflow) -> None:
@@ -229,6 +351,14 @@ class RunManager:
 
         for node_id in nodes:
             visit(node_id)
+
+
+def _workspace_files(workspace: Path) -> set[str]:
+    return {
+        str(path.relative_to(workspace))
+        for path in workspace.rglob("*")
+        if path.is_file()
+    }
 
 
 def estimate_request(request: ProviderRequest) -> int:

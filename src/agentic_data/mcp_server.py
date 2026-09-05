@@ -10,9 +10,10 @@ from .contracts import AgentNode, Harness, Workflow
 from .providers import ProviderName, ProviderRequest
 from .run_manager import RunLimits, RunManager
 from .runners import ClaudeAdapter, CodexAdapter, CopilotAdapter, OllamaAdapter
+from .tool_gateway import AVAILABLE_TOOLS
 
 
-mcp = MCPServer("Orbia Agentic Data Platform")
+mcp = MCPServer("ML.agentic Agentic Data Platform")
 manager = RunManager(
     {
         ProviderName.OPENAI_CODEX: CodexAdapter(),
@@ -28,6 +29,10 @@ def parse_workflow(raw: str) -> Workflow:
     nodes = []
     for item in data["nodes"]:
         config = item.get("harness", {})
+        tools = tuple(config.get("tools", []))
+        unknown_tools = sorted(set(tools) - set(AVAILABLE_TOOLS))
+        if unknown_tools:
+            raise ValueError(f"unsupported tools: {unknown_tools}")
         nodes.append(
             AgentNode(
                 id=item["id"],
@@ -37,7 +42,7 @@ def parse_workflow(raw: str) -> Workflow:
                     model=config.get("model", "auto"),
                     provider=config.get("provider", "auto"),
                     fallback_provider=config.get("fallback_provider"),
-                    tools=tuple(config.get("tools", [])),
+                    tools=tools,
                     approval=config.get("approval", "never"),
                     max_retries=int(config.get("max_retries", 0)),
                     timeout_seconds=int(config.get("timeout_seconds", 300)),
@@ -49,16 +54,18 @@ def parse_workflow(raw: str) -> Workflow:
 
 
 def _plan_problem(problem: str, provider: ProviderName, model: str = "auto") -> tuple[Workflow, Any]:
-    """Ask the selected provider to propose a bounded DAG; Orbia validates the result."""
+    """Ask the selected provider to propose a bounded DAG; ML.agentic validates the result."""
     if not 10 <= len(problem.strip()) <= 20_000:
         raise ValueError("problem must contain between 10 and 20000 characters")
     request = ProviderRequest(
         model=model,
         instructions=(
-            "Tu es le planificateur Orbia. Transforme le problème en DAG de data science exécutable. "
+            "Tu es le planificateur ML.agentic. Transforme le problème en DAG de data science exécutable. "
             "Retourne un objet JSON avec id, objective et nodes. Chaque node contient id, role, "
-            "depends_on et harness. Utilise provider='auto', model='auto', une allowlist tools minimale, "
-            "approval='never' sauf action irréversible, max_retries<=2, network='deny'. Maximum 24 nodes."
+            "depends_on et harness. Utilise provider='auto', model='auto' et une allowlist tools minimale. "
+            f"Les seuls outils disponibles sont: {', '.join(AVAILABLE_TOOLS)}. "
+            "N'invente aucun autre outil. Utilise approval='never' sauf action irréversible, "
+            "max_retries<=2, network='deny'. Maximum 24 nodes."
         ),
         input=[{"problem": problem}],
         max_output_tokens=4_000,
@@ -76,7 +83,7 @@ def _plan_problem(problem: str, provider: ProviderName, model: str = "auto") -> 
 
 @mcp.tool()
 def platform_manifest() -> dict[str, Any]:
-    """Return Orbia's providers and non-negotiable execution boundaries."""
+    """Return ML.agentic providers, tools and non-negotiable execution boundaries."""
     return {
         "providers": {
             "openai_codex": "local Codex CLI using ChatGPT subscription authentication",
@@ -84,13 +91,16 @@ def platform_manifest() -> dict[str, Any]:
             "anthropic_claude": "local Claude Code CLI using Anthropic authentication",
             "ollama": "local Ollama HTTP runtime",
         },
+        "tools": list(AVAILABLE_TOOLS),
         "boundaries": [
             "dependency-aware DAG",
-            "token and model-turn budgets",
+            "token, tool-call and model-turn budgets",
             "tool allowlist per agent",
+            "run-scoped workspace",
             "no secret in workflow JSON",
             "human approval represented in the harness",
         ],
+        "security_note": "python.run is workspace-scoped by cwd but is not yet an OS/container sandbox",
     }
 
 
@@ -135,13 +145,13 @@ def solve_problem(
 
 @mcp.tool()
 def run_agent(run_id: str, node_id: str) -> dict:
-    """Execute one ready agent with its configured provider."""
+    """Execute one ready agent with its configured provider and allowlisted tools."""
     return manager.execute(run_id, node_id)
 
 
 @mcp.tool()
 def run_autonomous(run_id: str) -> dict:
-    """Let Orbia execute the DAG until completion, approval, failure or a hard limit."""
+    """Let ML.agentic execute the DAG until completion, approval, failure or a hard limit."""
     outcome = manager.execute_until_blocked(run_id)
     return {**outcome, **_run_status(run_id)}
 
@@ -163,6 +173,7 @@ def _run_status(run_id: str) -> dict:
     run = manager.runs[run_id]
     return {
         "run_id": run.id,
+        "workspace": str(run.workspace),
         "completed": {node_id: result.state for node_id, result in run.results.items()},
         "ready": [node.id for node in manager.ready(run_id)],
         "model_turns": run.model_turns,

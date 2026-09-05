@@ -96,7 +96,8 @@ def _artifacts(workspace: Path, dataset_name: str) -> list[str]:
 
 
 def init_command(args: argparse.Namespace) -> dict[str, Any]:
-    project = ProjectStore(args.projects_root).create(args.name, args.path)
+    projects_root = getattr(args, "projects_root", ".ml-agentic/projects")
+    project = ProjectStore(projects_root).create(args.name, getattr(args, "path", None))
     return {
         "project_id": project.id,
         "name": project.name,
@@ -114,8 +115,10 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
     if source.suffix.lower() != ".csv":
         raise ValueError("the first ML.agentic data runner currently accepts CSV files only")
 
-    store = ProjectStore(args.projects_root)
-    project = store.open(args.project) if args.project else None
+    projects_root = getattr(args, "projects_root", ".ml-agentic/projects")
+    project_path = getattr(args, "project", None)
+    store = ProjectStore(projects_root)
+    project = store.open(project_path) if project_path else None
     registry = ArtifactRegistry(project.root) if project else None
     if project:
         source = store.add_dataset(project, source)
@@ -124,7 +127,7 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
     adapters = _adapters()
     dataset_name = "input.csv"
     workflow, planner_usage = _plan(args.problem, dataset_name, provider, args.model, adapters)
-    workspace_root = project.runs_dir if project else Path(args.workspace_root)
+    workspace_root = project.runs_dir if project else Path(getattr(args, "workspace_root", ".ml-agentic/runs"))
     manager = RunManager(adapters, workspace_root=workspace_root)
     if project:
         manager.events.subscribe(lambda event: store.append_runtime_event(project, event))
@@ -178,16 +181,18 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def artifacts_command(args: argparse.Namespace) -> dict[str, Any]:
-    project = ProjectStore(args.projects_root).open(args.project)
-    records = ArtifactRegistry(project.root).list(args.run_id)
+    projects_root = getattr(args, "projects_root", ".ml-agentic/projects")
+    project = ProjectStore(projects_root).open(args.project)
+    records = ArtifactRegistry(project.root).list(getattr(args, "run_id", None))
     return {"project_id": project.id, "count": len(records), "artifacts": records}
 
 
 def promote_command(args: argparse.Namespace) -> dict[str, Any]:
-    project = ProjectStore(args.projects_root).open(args.project)
+    projects_root = getattr(args, "projects_root", ".ml-agentic/projects")
+    project = ProjectStore(projects_root).open(args.project)
     registry = ArtifactRegistry(project.root)
-    promoted = registry.promote(args.artifact_id, args.name)
-    ProjectStore(args.projects_root).append_event(
+    promoted = registry.promote(args.artifact_id, getattr(args, "name", None))
+    ProjectStore(projects_root).append_event(
         project,
         "artifact.promoted",
         {

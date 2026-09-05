@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .events import RuntimeEvent
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -90,6 +92,12 @@ class ProjectStore:
 
     def append_event(self, project: Project, event_type: str, payload: dict[str, Any]) -> None:
         event = {"time": _now(), "type": event_type, "payload": payload}
+        self._write_event(project, event)
+
+    def append_runtime_event(self, project: Project, event: RuntimeEvent) -> None:
+        self._write_event(project, event.as_dict())
+
+    def _write_event(self, project: Project, event: dict[str, Any]) -> None:
         with project.events_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
 

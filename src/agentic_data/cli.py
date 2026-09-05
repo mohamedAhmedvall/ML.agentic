@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import AgentNode, Harness, Workflow
+from .project_store import ProjectStore
 from .providers import ProviderName, ProviderRequest
 from .run_manager import RunLimits, RunManager
 from .runners import ClaudeAdapter, CodexAdapter, CopilotAdapter, OllamaAdapter
@@ -65,13 +66,7 @@ def _plan(
             "python.run pour les calculs/modèles et file.write_text pour créer les rapports. "
             "Maximum 24 nodes. Ne demande pas de réseau."
         ),
-        input=[
-            {
-                "problem": problem,
-                "dataset": dataset_name,
-                "available_tools": available_tools,
-            }
-        ],
+        input=[{"problem": problem, "dataset": dataset_name, "available_tools": available_tools}],
         max_output_tokens=4_000,
     )
     response = adapters[provider].invoke(request)
@@ -99,6 +94,17 @@ def _artifacts(workspace: Path, dataset_name: str) -> list[str]:
     )
 
 
+def init_command(args: argparse.Namespace) -> dict[str, Any]:
+    project = ProjectStore(args.projects_root).create(args.name, args.path)
+    return {
+        "project_id": project.id,
+        "name": project.name,
+        "path": str(project.root),
+        "directories": ["datasets", "runs", "artifacts"],
+        "events": str(project.events_file),
+    }
+
+
 def run_command(args: argparse.Namespace) -> dict[str, Any]:
     source = Path(args.data).expanduser().resolve()
     if not source.is_file():
@@ -106,11 +112,17 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
     if source.suffix.lower() != ".csv":
         raise ValueError("the first ML.agentic data runner currently accepts CSV files only")
 
+    store = ProjectStore(args.projects_root)
+    project = store.open(args.project) if args.project else None
+    if project:
+        source = store.add_dataset(project, source)
+
     provider = ProviderName(args.provider)
     adapters = _adapters()
     dataset_name = "input.csv"
     workflow, planner_usage = _plan(args.problem, dataset_name, provider, args.model, adapters)
-    manager = RunManager(adapters, workspace_root=args.workspace_root)
+    workspace_root = project.runs_dir if project else Path(args.workspace_root)
+    manager = RunManager(adapters, workspace_root=workspace_root)
     run = manager.start(
         workflow,
         RunLimits(max_tokens=args.max_tokens, max_model_turns=args.max_model_turns),
@@ -119,9 +131,12 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
     shutil.copy2(source, run.workspace / dataset_name)
     run.budget.record(planner_usage)
     run.model_turns = 1
+    if project:
+        store.append_event(project, "run.started", {"run_id": run.id, "problem": args.problem})
 
     outcome = manager.execute_until_blocked(run.id)
     summary = {
+        "project_id": project.id if project else None,
         "run_id": run.id,
         "status": outcome["status"],
         "workflow_id": workflow.id,
@@ -131,24 +146,35 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
         "model_turns": run.model_turns,
         "used_tokens": run.budget.used_tokens,
         "nodes": {
-            node_id: {
-                "state": result.state,
-                "output": result.output,
-                "error": result.error,
-            }
+            node_id: {"state": result.state, "output": result.output, "error": result.error}
             for node_id, result in run.results.items()
         },
     }
-    (run.workspace / "run.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    (run.workspace / "run.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    if project:
+        store.append_event(
+            project,
+            "run.finished",
+            {"run_id": run.id, "status": outcome["status"], "artifacts": summary["artifacts"]},
+        )
     return summary
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ml-agentic", description="Controlled agentic data-science runtime")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    init = sub.add_parser("init", help="Create a persistent ML.agentic project")
+    init.add_argument("name", help="Project name")
+    init.add_argument("--path", help="Explicit project directory")
+    init.add_argument("--projects-root", default=".ml-agentic/projects")
+
     run = sub.add_parser("run", help="Plan and execute a data-science workflow on a CSV")
     run.add_argument("--data", required=True, help="Path to the input CSV")
     run.add_argument("--problem", required=True, help="Business/data-science objective")
+    run.add_argument("--project", help="Existing ML.agentic project directory")
     run.add_argument(
         "--provider",
         default="openai_codex",
@@ -158,13 +184,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-tokens", type=int, default=24_000)
     run.add_argument("--max-model-turns", type=int, default=12)
     run.add_argument("--workspace-root", default=".ml-agentic/runs")
+    run.add_argument("--projects-root", default=".ml-agentic/projects")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    if args.command == "run":
-        print(json.dumps(run_command(args), ensure_ascii=False, indent=2, default=str))
+    if args.command == "init":
+        result = init_command(args)
+    elif args.command == "run":
+        result = run_command(args)
+    else:
+        raise ValueError(f"unknown command: {args.command}")
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from typing import Any
 from mcp.server import MCPServer
 
 from .contracts import AgentNode, Harness, Workflow
-from .providers import ProviderName
+from .providers import ProviderName, ProviderRequest
 from .run_manager import RunLimits, RunManager
 from .runners import ClaudeAdapter, CodexAdapter, CopilotAdapter, OllamaAdapter
 
@@ -48,6 +48,32 @@ def parse_workflow(raw: str) -> Workflow:
     return Workflow(id=data["id"], objective=data["objective"], nodes=tuple(nodes))
 
 
+def _plan_problem(problem: str, provider: ProviderName, model: str = "auto") -> tuple[Workflow, Any]:
+    """Ask the selected provider to propose a bounded DAG; Orbia validates the result."""
+    if not 10 <= len(problem.strip()) <= 20_000:
+        raise ValueError("problem must contain between 10 and 20000 characters")
+    request = ProviderRequest(
+        model=model,
+        instructions=(
+            "Tu es le planificateur Orbia. Transforme le problème en DAG de data science exécutable. "
+            "Retourne un objet JSON avec id, objective et nodes. Chaque node contient id, role, "
+            "depends_on et harness. Utilise provider='auto', model='auto', une allowlist tools minimale, "
+            "approval='never' sauf action irréversible, max_retries<=2, network='deny'. Maximum 24 nodes."
+        ),
+        input=[{"problem": problem}],
+        max_output_tokens=4_000,
+    )
+    response = manager.adapters[provider].invoke(request)
+    plan = response.output.get("workflow", response.output)
+    if not isinstance(plan, dict):
+        raise ValueError("planner did not return a workflow object")
+    plan.setdefault("id", "wf_generated")
+    plan.setdefault("objective", problem)
+    if len(plan.get("nodes", [])) > 24:
+        raise ValueError("planner exceeded the 24-node limit")
+    return parse_workflow(json.dumps(plan)), response.usage
+
+
 @mcp.tool()
 def platform_manifest() -> dict[str, Any]:
     """Return Orbia's providers and non-negotiable execution boundaries."""
@@ -83,6 +109,28 @@ def start_workflow(
         default_provider=ProviderName(provider),
     )
     return {"run_id": run.id, "ready": [node.id for node in manager.ready(run.id)]}
+
+
+@mcp.tool()
+def solve_problem(
+    problem: str,
+    provider: str = "openai_codex",
+    model: str = "auto",
+    max_tokens: int = 24000,
+    max_model_turns: int = 12,
+) -> dict:
+    """Plan a data-science DAG from one problem and execute it autonomously until blocked."""
+    selected = ProviderName(provider)
+    workflow, planner_usage = _plan_problem(problem, selected, model)
+    run = manager.start(
+        workflow,
+        RunLimits(max_tokens=max_tokens, max_model_turns=max_model_turns),
+        default_provider=selected,
+    )
+    run.budget.record(planner_usage)
+    run.model_turns = 1
+    outcome = manager.execute_until_blocked(run.id)
+    return {"workflow_id": workflow.id, **outcome, **_run_status(run.id)}
 
 
 @mcp.tool()

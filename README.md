@@ -53,12 +53,12 @@ Streamable HTTP for ChatGPT/plugin development:
 mcp run src/agentic_data/mcp_server.py --transport streamable-http
 ```
 
-MCP is an optional control interface, not the orchestrator. A UI or any compatible client can call `start_workflow`, then `run_autonomous`. Nodes configured with `auto` use the provider selected when the run starts; individual nodes can override it and declare a fallback.
+MCP is an optional control interface, not the orchestrator. A UI or any compatible client can call `solve_problem` with a plain-language problem and provider: the selected planner proposes a DAG, Orbia validates it, then executes it until completion or a control gate. Existing DAGs can use `start_workflow`, then `run_autonomous`. Nodes configured with `auto` use the provider selected when the run starts; individual nodes can override it and declare a fallback.
 
 ## Global operation
 
 1. The user describes the business/data problem and selects a provider.
-2. A planner produces a validated workflow DAG (the MVP can also accept a saved DAG directly).
+2. The selected provider proposes a workflow DAG; Orbia validates its shape, dependencies and 24-node ceiling.
 3. The scheduler releases nodes whose dependencies are satisfied.
 4. Each agent receives only its role, dependency outputs, allowed tools and budget.
 5. Orbia continues until the DAG completes, a human gate is reached, a provider fails without fallback, or a hard budget is exhausted.

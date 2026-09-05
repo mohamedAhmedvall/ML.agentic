@@ -72,7 +72,7 @@ class Route:
 
 
 class ProviderRouter:
-    """Optional auto-routing policy. Orbia remains the orchestrator."""
+    """Optional auto-routing policy. ML.agentic remains the orchestrator."""
 
     def route(self, task: TaskKind, default: ProviderName) -> Route:
         if task in {TaskKind.CODE_GENERATION, TaskKind.DATA_ANALYSIS}:

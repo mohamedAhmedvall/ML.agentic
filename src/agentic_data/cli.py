@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .artifacts import ArtifactRegistry
 from .contracts import AgentNode, Harness, Workflow
 from .project_store import ProjectStore
 from .providers import ProviderName, ProviderRequest
@@ -102,6 +103,7 @@ def init_command(args: argparse.Namespace) -> dict[str, Any]:
         "path": str(project.root),
         "directories": ["datasets", "runs", "artifacts"],
         "events": str(project.events_file),
+        "artifact_registry": str(project.root / "artifacts.jsonl"),
     }
 
 
@@ -114,6 +116,7 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
 
     store = ProjectStore(args.projects_root)
     project = store.open(args.project) if args.project else None
+    registry = ArtifactRegistry(project.root) if project else None
     if project:
         source = store.add_dataset(project, source)
 
@@ -131,11 +134,28 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
         RunLimits(max_tokens=args.max_tokens, max_model_turns=args.max_model_turns),
         default_provider=provider,
     )
+
+    if registry:
+        def register_artifact(event: Any) -> None:
+            if event.type != "artifact.created" or event.run_id != run.id:
+                return
+            payload = event.payload
+            registry.register(
+                run.id,
+                run.workspace,
+                payload["path"],
+                created_by=event.node_id or payload.get("created_by"),
+                tool=payload.get("tool"),
+            )
+
+        manager.events.subscribe(register_artifact)
+
     shutil.copy2(source, run.workspace / dataset_name)
     run.budget.record(planner_usage)
     run.model_turns = 1
 
     outcome = manager.execute_until_blocked(run.id)
+    artifact_records = registry.list(run.id) if registry else []
     summary = {
         "project_id": project.id if project else None,
         "run_id": run.id,
@@ -143,7 +163,7 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
         "workflow_id": workflow.id,
         "workspace": str(run.workspace.resolve()),
         "dataset": dataset_name,
-        "artifacts": _artifacts(run.workspace, dataset_name),
+        "artifacts": artifact_records if registry else _artifacts(run.workspace, dataset_name),
         "model_turns": run.model_turns,
         "used_tokens": run.budget.used_tokens,
         "nodes": {
@@ -155,6 +175,28 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
         json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
     return summary
+
+
+def artifacts_command(args: argparse.Namespace) -> dict[str, Any]:
+    project = ProjectStore(args.projects_root).open(args.project)
+    records = ArtifactRegistry(project.root).list(args.run_id)
+    return {"project_id": project.id, "count": len(records), "artifacts": records}
+
+
+def promote_command(args: argparse.Namespace) -> dict[str, Any]:
+    project = ProjectStore(args.projects_root).open(args.project)
+    registry = ArtifactRegistry(project.root)
+    promoted = registry.promote(args.artifact_id, args.name)
+    ProjectStore(args.projects_root).append_event(
+        project,
+        "artifact.promoted",
+        {
+            "artifact_id": args.artifact_id,
+            "promoted_path": promoted["promoted_path"],
+            "run_id": promoted["run_id"],
+        },
+    )
+    return {"project_id": project.id, "artifact": promoted}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -180,6 +222,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-model-turns", type=int, default=12)
     run.add_argument("--workspace-root", default=".ml-agentic/runs")
     run.add_argument("--projects-root", default=".ml-agentic/projects")
+
+    artifacts = sub.add_parser("artifacts", help="List project artifacts")
+    artifacts.add_argument("--project", required=True, help="Existing ML.agentic project directory")
+    artifacts.add_argument("--run-id", help="Only artifacts from one run")
+    artifacts.add_argument("--projects-root", default=".ml-agentic/projects")
+
+    promote = sub.add_parser("promote", help="Promote a run artifact to the project artifact directory")
+    promote.add_argument("artifact_id", help="Artifact registry id")
+    promote.add_argument("--project", required=True, help="Existing ML.agentic project directory")
+    promote.add_argument("--name", help="Optional promoted file name")
+    promote.add_argument("--projects-root", default=".ml-agentic/projects")
     return parser
 
 
@@ -189,6 +242,10 @@ def main() -> None:
         result = init_command(args)
     elif args.command == "run":
         result = run_command(args)
+    elif args.command == "artifacts":
+        result = artifacts_command(args)
+    elif args.command == "promote":
+        result = promote_command(args)
     else:
         raise ValueError(f"unknown command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

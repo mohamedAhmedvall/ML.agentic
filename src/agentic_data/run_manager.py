@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .contracts import AgentNode, NodeResult, NodeState, Workflow
-from .providers import ProviderName, ProviderRequest
+from .providers import ProviderName, ProviderRequest, ProviderUsage
 from .runners import ProviderUnavailable
 from .token_budget import TokenBudget
 
@@ -34,22 +34,11 @@ class RunManager:
         self.adapters = adapters
         self.runs: dict[str, ManagedRun] = {}
 
-    def start(
-        self,
-        workflow: Workflow,
-        limits: RunLimits | None = None,
-        default_provider: ProviderName = ProviderName.OPENAI_CODEX,
-    ) -> ManagedRun:
+    def start(self, workflow: Workflow, limits: RunLimits | None = None, default_provider: ProviderName = ProviderName.OPENAI_CODEX) -> ManagedRun:
         workflow.node_map()
         self._assert_acyclic(workflow)
         limits = limits or RunLimits()
-        run = ManagedRun(
-            id=f"run_{uuid.uuid4().hex[:12]}",
-            workflow=workflow,
-            limits=limits,
-            budget=TokenBudget(limits.max_tokens, limits.max_cost_micros),
-            default_provider=default_provider,
-        )
+        run = ManagedRun(id=f"run_{uuid.uuid4().hex[:12]}", workflow=workflow, limits=limits, budget=TokenBudget(limits.max_tokens, limits.max_cost_micros), default_provider=default_provider)
         self.runs[run.id] = run
         return run
 
@@ -72,10 +61,7 @@ class RunManager:
         dependencies = {dep: run.results[dep].output for dep in node.depends_on}
         return ProviderRequest(
             model=node.harness.model,
-            instructions=(
-                f"Tu es l'agent {node.role} du workflow Orbia. Retourne uniquement un objet JSON. "
-                f"Objectif métier: {run.workflow.objective}"
-            ),
+            instructions=(f"Tu es l'agent {node.role} du workflow ML.agentic. Retourne uniquement un objet JSON. " f"Objectif métier: {run.workflow.objective}"),
             input=[{"dependencies": dependencies, "allowed_tools": list(node.harness.tools)}],
             max_output_tokens=min(2_000, run.budget.remaining_tokens),
         )
@@ -109,7 +95,6 @@ class RunManager:
         return {"status": "succeeded", "output": response.output, "usage": usage_dict(response.usage)}
 
     def execute_until_blocked(self, run_id: str) -> dict[str, Any]:
-        """Run every ready node until completion, approval, failure or a hard limit."""
         while True:
             ready = self.ready(run_id)
             if not ready:
@@ -141,7 +126,6 @@ class RunManager:
         nodes = workflow.node_map()
         visiting: set[str] = set()
         visited: set[str] = set()
-
         def visit(node_id: str) -> None:
             if node_id in visiting:
                 raise ValueError("workflow contains a cycle")
@@ -152,7 +136,6 @@ class RunManager:
                 visit(dependency)
             visiting.remove(node_id)
             visited.add(node_id)
-
         for node_id in nodes:
             visit(node_id)
 
@@ -162,9 +145,4 @@ def estimate_request(request: ProviderRequest) -> int:
 
 
 def usage_dict(usage: ProviderUsage) -> dict[str, Any]:
-    return {
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "cached_input_tokens": usage.cached_input_tokens,
-        "measurement": usage.measurement,
-    }
+    return {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "cached_input_tokens": usage.cached_input_tokens, "measurement": usage.measurement}

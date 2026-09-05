@@ -123,6 +123,9 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
     workflow, planner_usage = _plan(args.problem, dataset_name, provider, args.model, adapters)
     workspace_root = project.runs_dir if project else Path(args.workspace_root)
     manager = RunManager(adapters, workspace_root=workspace_root)
+    if project:
+        manager.events.subscribe(lambda event: store.append_runtime_event(project, event))
+
     run = manager.start(
         workflow,
         RunLimits(max_tokens=args.max_tokens, max_model_turns=args.max_model_turns),
@@ -131,8 +134,6 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
     shutil.copy2(source, run.workspace / dataset_name)
     run.budget.record(planner_usage)
     run.model_turns = 1
-    if project:
-        store.append_event(project, "run.started", {"run_id": run.id, "problem": args.problem})
 
     outcome = manager.execute_until_blocked(run.id)
     summary = {
@@ -153,12 +154,6 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
     (run.workspace / "run.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
-    if project:
-        store.append_event(
-            project,
-            "run.finished",
-            {"run_id": run.id, "status": outcome["status"], "artifacts": summary["artifacts"]},
-        )
     return summary
 
 

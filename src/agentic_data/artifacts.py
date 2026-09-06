@@ -92,7 +92,7 @@ class ArtifactRegistry:
         record = ArtifactRecord(
             id=f"art_{uuid.uuid4().hex[:12]}",
             run_id=run_id,
-            path=str(path.relative_to(self.project_root)),
+            path=path.relative_to(self.project_root).as_posix(),
             name=path.name,
             size_bytes=path.stat().st_size,
             sha256=_sha256(path),
@@ -138,7 +138,7 @@ class ArtifactRegistry:
         shutil.copy2(source, target)
         promoted = dict(record)
         promoted["status"] = "promoted"
-        promoted["promoted_path"] = str(target.relative_to(self.project_root))
+        promoted["promoted_path"] = target.relative_to(self.project_root).as_posix()
         promoted["promoted_at"] = _now()
         self._append(promoted)
         return promoted

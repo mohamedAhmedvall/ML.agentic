@@ -2,6 +2,36 @@
 
 ML.agentic is an agent-native data science workspace. Its deterministic control plane—not a model provider—owns dependencies, budgets, approvals, tools and run state. The user presents a problem, selects a default provider, and ML.agentic lets agents execute a validated DAG autonomously.
 
+## Demarrage rapide depuis PowerShell
+
+Python 3.11 ou plus recent doit etre installe. Dans le dossier du depot :
+
+```powershell
+.\start.cmd
+```
+
+Le lanceur cree `.venv`, installe les dependances web necessaires et ouvre le
+navigateur quand le serveur repond. Aucune activation PowerShell n’est requise.
+Les lancements suivants reutilisent l’installation. Gardez le terminal ouvert;
+Ctrl+C arrete le serveur.
+
+Pour mettre a jour la branche courante puis demarrer :
+
+```powershell
+.\start.cmd --update
+```
+
+Le lanceur utilise `git pull --ff-only` : il ne change pas de branche et ne
+supprime pas vos modifications. Options : `--port 8766`, `--no-browser`.
+Sur macOS/Linux, utilisez `python3 start.py`.
+
+L’installation/connexion du provider reste une etape distincte : le lanceur
+n’installe aucun provider et ne se connecte pas a votre compte automatiquement.
+Docker avec des conteneurs Linux et l’image `python:3.12-slim` restent requis
+pour l’outil Python; les outils CSV/fichiers n’en ont pas besoin.
+Le dashboard peut etre lance nativement depuis PowerShell. L’execution reelle
+Codex/Docker sur Windows reste a valider sur un poste equipe.
+
 ## Working MVP
 
 - Dependency-aware workflow DAG.
@@ -105,3 +135,55 @@ python -m unittest discover -s tests -v
 ```
 
 GitHub Actions runs the unit suite on Python 3.11 and 3.12 for pushes and pull requests.
+
+## Local project control dashboard
+
+Install and start from a virtual environment:
+
+```bash
+python -m pip install -e '.[web,test]'
+ml-agentic-web
+```
+
+Open http://127.0.0.1:8765. Create or open a project, upload a UTF-8 CSV
+(up to 5 MB), describe the problem, choose a provider/model and generate a plan.
+Inspect the agents and tools, set the execution token/turn limits, then select
+**Valider et lancer**. Planning already consumes a provider call; its reported
+usage is charged to the run when launched. These limits do not pre-limit planning.
+Install/authenticate the selected provider separately as described in
+`docs/PROVIDERS_AND_TOKENS.md`.
+
+Select a run to inspect its agents, tool results and downloadable artifacts.
+Pause takes effect **between agents**. Paused and approval-gated web runs can
+resume after restarting the server, retaining completed outputs, approvals and
+reported token usage. Checkpoints are stored beside run directories as
+`runs/<run_id>.state.json`. A run interrupted during an agent is not automatically
+replayed: inspect its artifacts before launching a new run. This avoids silently
+repeating actions whose completion is uncertain. CLI/MCP runs do not yet use
+these web-run checkpoints.
+
+The web runner requires Docker for `python.run` and never falls back to host
+Python. Prepare the default image explicitly:
+
+```bash
+docker pull python:3.12-slim
+```
+
+This image contains Python's standard library. Set `ML_AGENTIC_PYTHON_IMAGE` to a
+prebuilt local image containing your data-science dependencies when needed.
+Containers have no network, a read-only root, restricted capabilities, CPU/memory/
+process limits and a timeout; only the run workspace is mounted writable.
+The existing CLI/MCP gateway still uses host Python. Provider CLI subprocesses
+are a separate boundary and are not placed inside these tool containers.
+
+Run one dashboard process/worker on a trusted local machine. It binds to
+loopback and checks Host and per-session mutation tokens. It is not a multi-user
+server: do not expose it to the public network. This version does not promise
+exactly-once tools, mid-agent recovery, or container disk quotas for artifacts.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The suite uses deterministic provider doubles. Live provider sign-in and Docker
+execution require a separately configured runner.

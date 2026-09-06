@@ -82,6 +82,16 @@ class WebAppTests(unittest.TestCase):
             self.assertEqual(snapshot["draft"]["workflow"]["id"], "wf_web")
             self.assertTrue(any(event["type"] == "workflow.planned" for event in snapshot["events"]))
 
+    def test_missing_provider_returns_actionable_error(self):
+        from agentic_data.runners import ProviderUnavailable
+        client = TestClient(app, base_url='http://localhost')
+        token = re.search('name="control-token" content="([^"]+)"', client.get('/').text)[1]
+        client.headers['X-ML-Agentic-Token'] = token
+        with patch('agentic_data.web_app.generate_plan_preview', side_effect=ProviderUnavailable('Codex CLI indisponible; exécuter codex login')):
+            response = client.post('/api/plan', json={'project_path': '/unused', 'dataset': 'input.csv', 'problem': 'inspect data'})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('codex login', response.json()['detail'])
+
     def test_web_api_creates_project_and_plans_dag(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = TestClient(app, base_url='http://localhost')

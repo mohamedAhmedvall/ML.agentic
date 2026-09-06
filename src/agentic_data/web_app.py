@@ -12,7 +12,7 @@ from .planning import plan_workflow, workflow_to_dict
 from .project_store import ProjectStore
 from .run_service import RunService
 from .providers import ProviderName
-from .runners import ClaudeAdapter, CodexAdapter, CopilotAdapter, OllamaAdapter
+from .runners import ClaudeAdapter, CodexAdapter, CopilotAdapter, OllamaAdapter, ProviderUnavailable
 
 
 def _adapters() -> dict[ProviderName, Any]:
@@ -226,6 +226,10 @@ def build_app(service=None):
                 return JSONResponse({"detail": "Maximum request size: 8 MB"}, status_code=413)
         return await call_next(request)
 
+    @app.exception_handler(ProviderUnavailable)
+    def provider_unavailable(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=503)
+
     @app.exception_handler(ValueError)
     @app.exception_handler(KeyError)
     @app.exception_handler(OSError)
@@ -347,7 +351,7 @@ async function refresh(){const r=await fetch('/api/project?path='+encodeURICompo
 function connect(){if(source)source.close();source=new EventSource('/api/events?path='+encodeURIComponent(current));source.addEventListener('ready',()=>{live.textContent='● live';live.className='live'});source.addEventListener('runtime',()=>refresh());source.onerror=()=>{live.textContent='reconnexion…';live.className='muted'}}
 async function openProject(){current=document.getElementById('path').value.trim();activeRun=null;selected=null;if(!current)return;try{await refresh();connect();localStorage.setItem('ml-agentic-project',current)}catch(e){current=null;if(source)source.close();alert(e.message)}}
 async function newProject(){const name=prompt('Nom du projet');if(!name)return;const explicit=prompt('Dossier du projet (laisser vide pour automatique)')||null;const r=await apiFetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,path:explicit})});const d=await r.json();if(!r.ok){alert(d.detail||'Erreur');return}path.value=d.path;await openProject()}
-async function generatePlan(){if(!current)return;const problem=document.getElementById('problem').value.trim(),dataset=document.getElementById('dataset').value,provider=document.getElementById('provider').value;if(!problem||!dataset){alert('Ajoute un problème et un dataset');return}planStatus.textContent='planning…';const r=await apiFetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_path:current,problem,dataset,provider,model:document.getElementById('model').value.trim()||'auto'})});const d=await r.json();if(!r.ok){planStatus.textContent='échec';alert(d.detail||'Erreur');return}planStatus.textContent='Plan prêt';activeRun=null;await refresh()}
+async function generatePlan(){if(!current)return;const problem=document.getElementById('problem').value.trim(),dataset=document.getElementById('dataset').value,provider=document.getElementById('provider').value;if(!problem||!dataset){alert('Ajoute un problème et un dataset');return}planStatus.textContent='planning…';const r=await apiFetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_path:current,problem,dataset,provider,model:document.getElementById('model').value.trim()||'auto'})});const d=await r.json();if(!r.ok){planStatus.textContent=d.detail||'Provider indisponible';return}planStatus.textContent='Plan prêt';activeRun=null;await refresh()}
 function renderControls(){
  document.querySelectorAll('#runs .card').forEach((el,i)=>{el.tabIndex=0;el.setAttribute('role','button');el.onclick=()=>{activeRun=data.runs[i].run_id;selected=null;render()};el.onkeydown=e=>{if(e.key==='Enter')el.click()}});
  document.getElementById('launch').disabled=!data?.draft;

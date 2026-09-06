@@ -154,7 +154,7 @@ with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
                    '--security-opt=no-new-privileges', '--memory=512m', '--cpus=1',
                    '--pids-limit=64', '--ulimit=fsize=16777216:16777216',
                    '--tmpfs=/tmp:rw,nosuid,noexec,size=64m',
-                   '--user', f'{os.getuid()}:{os.getgid()}',
+                   *(['--user', f'{os.getuid()}:{os.getgid()}'] if hasattr(os, 'getuid') else []),
                    '--mount', f'type=bind,source={self.workspace},target=/workspace',
                    '--workdir=/workspace', os.environ.get('ML_AGENTIC_PYTHON_IMAGE', 'python:3.12-slim'),
                    'python', '-I', '-c', wrapper]

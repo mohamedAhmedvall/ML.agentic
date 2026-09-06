@@ -2,6 +2,36 @@
 
 ML.agentic is an agent-native data science workspace. Its deterministic control plane—not a model provider—owns dependencies, budgets, approvals, tools and run state. The user presents a problem, selects a default provider, and ML.agentic lets agents execute a validated DAG autonomously.
 
+## Demarrage rapide depuis PowerShell
+
+Python 3.11 ou plus recent doit etre installe. Dans le dossier du depot :
+
+```powershell
+.\start.cmd
+```
+
+Le lanceur cree `.venv`, installe les dependances web necessaires et ouvre le
+navigateur quand le serveur repond. Aucune activation PowerShell n’est requise.
+Les lancements suivants reutilisent l’installation. Gardez le terminal ouvert;
+Ctrl+C arrete le serveur.
+
+Pour mettre a jour la branche courante puis demarrer :
+
+```powershell
+.\start.cmd --update
+```
+
+Le lanceur utilise `git pull --ff-only` : il ne change pas de branche et ne
+supprime pas vos modifications. Options : `--port 8766`, `--no-browser`.
+Sur macOS/Linux, utilisez `python3 start.py`.
+
+L’installation/connexion du provider reste une etape distincte : le lanceur
+n’installe aucun provider et ne se connecte pas a votre compte automatiquement.
+Docker avec des conteneurs Linux et l’image `python:3.12-slim` restent requis
+pour l’outil Python; les outils CSV/fichiers n’en ont pas besoin.
+Le dashboard peut etre lance nativement depuis PowerShell. L’execution reelle
+Codex/Docker sur Windows reste a valider sur un poste equipe.
+
 ## Working MVP
 
 - Dependency-aware workflow DAG.

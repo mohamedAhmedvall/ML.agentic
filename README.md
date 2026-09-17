@@ -1,58 +1,135 @@
-# ML.agentic — Agentic Data Platform
+<div align="center">
 
-ML.agentic is an agent-native data science workspace. Its deterministic control plane—not a model provider—owns dependencies, budgets, approvals, tools and run state. The user presents a problem, selects a default provider, and ML.agentic lets agents execute a validated DAG autonomously.
+# ML.agentic
 
-## Demarrage rapide depuis PowerShell
+### Agent-native orchestration for reproducible data-science workflows
 
-Python 3.11 ou plus recent doit etre installe. Dans le dossier du depot :
+**Plan with an LLM. Execute with deterministic controls. Keep the human in charge.**
+
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![MCP](https://img.shields.io/badge/MCP-compatible-6B5DD3)
+![Docker](https://img.shields.io/badge/Docker-isolated%20tools-2496ED?logo=docker&logoColor=white)
+![Status](https://img.shields.io/badge/status-working%20MVP-orange)
+
+</div>
+
+---
+
+## Overview
+
+**ML.agentic** is an agent-native data-science workspace that separates **reasoning** from **execution control**.
+
+A model may propose a workflow, but it does not own the runtime. ML.agentic validates the generated DAG, enforces dependencies and budgets, restricts tools, manages approvals, tracks run state and stores artifacts in isolated workspaces.
+
+The goal is to make agentic workflows **inspectable, reproducible and controllable** instead of relying on an unrestricted autonomous shell.
+
+### Why this project exists
+
+Most agent frameworks are excellent at giving models more autonomy. ML.agentic explores the complementary problem:
+
+> **How do we let agents work autonomously while keeping execution deterministic, bounded and observable?**
+
+The project is designed around four principles:
+
+- **Provider independence** — Codex, GitHub Copilot, Claude Code and Ollama are treated as interchangeable reasoning providers.
+- **Deterministic control plane** — the runtime, not the model, owns dependencies, budgets, approvals and run state.
+- **Restricted execution** — agents request named capabilities through a Tool Gateway rather than receiving unrestricted machine access.
+- **Human control** — approval gates, pause/resume and explicit limits remain first-class concepts.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[User / UI / MCP client] --> P[Planner provider]
+    P --> D[Proposed workflow DAG]
+    D --> V[Workflow validator]
+    V --> O[ML.agentic orchestrator]
+
+    O --> A1[Agent A]
+    O --> A2[Agent B]
+    O --> A3[Agent N]
+
+    A1 --> G[Tool Gateway]
+    A2 --> G
+    A3 --> G
+
+    G --> F[file.read / write]
+    G --> C[data.inspect_csv]
+    G --> X[python.run]
+
+    O --> S[Run state + checkpoints]
+    O --> R[Artifacts + structured results]
+```
+
+### Control flow
+
+1. The user describes a business or data problem and selects a provider.
+2. The provider proposes a workflow DAG.
+3. ML.agentic validates dependencies, tool names, workflow shape and execution limits.
+4. The scheduler releases only nodes whose dependencies are satisfied.
+5. Each agent receives its role, dependency outputs, allowed tools and budget.
+6. Tool requests pass through the Tool Gateway and the node allowlist.
+7. Results are persisted and propagated to dependent agents.
+8. Execution stops on completion, a human gate, a provider failure or a hard budget limit.
+
+---
+
+## Current capabilities
+
+| Area | Capability |
+|---|---|
+| Orchestration | Dependency-aware DAG execution |
+| Providers | Codex, GitHub Copilot, Claude Code, Ollama |
+| Interfaces | CLI, MCP server, local web dashboard |
+| Controls | Per-run token/model-turn limits, per-agent provider/model/tool policies |
+| Human-in-the-loop | Approval gates and pause/resume between agents |
+| Tooling | Workspace-scoped file I/O, CSV inspection and Python execution |
+| State | Structured agent results, run summaries and web-run checkpoints |
+| Isolation | Docker-backed Python execution in the web runner |
+| Quality | Deterministic provider doubles and unit tests |
+
+> **Project status:** working MVP. The architecture and control plane are functional, while production hardening, broader ingestion and stronger recovery semantics remain active work.
+
+---
+
+## Quick start
+
+### Windows / PowerShell
+
+Requirements:
+
+- Python 3.11+
+- Docker for isolated `python.run` execution
+- At least one configured provider if you want real model execution
 
 ```powershell
 .\start.cmd
 ```
 
-Le lanceur cree `.venv`, installe les dependances web necessaires et ouvre le
-navigateur quand le serveur repond. Aucune activation PowerShell n’est requise.
-Les lancements suivants reutilisent l’installation. Gardez le terminal ouvert;
-Ctrl+C arrete le serveur.
+The launcher creates `.venv`, installs the required web dependencies and opens the dashboard when the server is ready.
 
-Pour mettre a jour la branche courante puis demarrer :
+Update the current branch before starting:
 
 ```powershell
 .\start.cmd --update
 ```
 
-Le lanceur utilise `git pull --ff-only` : il ne change pas de branche et ne
-supprime pas vos modifications. Options : `--port 8766`, `--no-browser`.
-Sur macOS/Linux, utilisez `python3 start.py`.
+Useful options:
 
-L’installation/connexion du provider reste une etape distincte : le lanceur
-n’installe aucun provider et ne se connecte pas a votre compte automatiquement.
-Docker avec des conteneurs Linux et l’image `python:3.12-slim` restent requis
-pour l’outil Python; les outils CSV/fichiers n’en ont pas besoin.
-Le dashboard peut etre lance nativement depuis PowerShell. L’execution reelle
-Codex/Docker sur Windows reste a valider sur un poste equipe.
+```powershell
+.\start.cmd --port 8766
+.\start.cmd --no-browser
+```
 
-## Working MVP
+### macOS / Linux
 
-- Dependency-aware workflow DAG.
-- MCP tools for starting a run, executing one agent, running autonomously and inspecting status.
-- Four peer providers: Codex with ChatGPT subscription sign-in, GitHub Copilot, Claude Code and Ollama.
-- Real local Ollama and GitHub Copilot adapters.
-- Per-run token and model-turn limits.
-- Per-agent provider, model, tool allowlist and approval gate.
-- Structured results shared between dependent agents.
-- Controlled local Tool Gateway with workspace-scoped file I/O, CSV inspection and Python execution.
-- End-to-end `ml-agentic run` command for CSV-based data-science workflows.
+```bash
+python3 start.py
+```
 
-## Repository map
-
-- `src/agentic_data/` — contracts, budgets, orchestration, CLI, MCP server, Tool Gateway and provider adapters
-- `specs/workflow.example.json` — portable workflow and harness configuration
-- `tests/` — dependency, budget, approval, routing, tool and CLI tests
-- `prototype/` — dependency-free interface concept
-- `docs/` — product, architecture, providers and roadmap
-
-The internal Python namespace remains `agentic_data` for compatibility; the product and package are ML.agentic / `ml-agentic`.
+---
 
 ## Install the runtime
 
@@ -63,127 +140,188 @@ pip install -e ".[runtime]"
 python -m copilot download-runtime
 ```
 
-Authenticate only the providers you want to expose on the runner:
+Authenticate only the providers you want to expose to the runner:
 
 ```bash
 codex login
 claude auth login
 ```
 
-## Run a real CSV workflow
+Provider installation and authentication intentionally remain separate from ML.agentic.
+
+---
+
+## Run a CSV workflow
 
 ```bash
 ml-agentic run \
   --data clients.csv \
-  --problem "Prédire le churn à 30 jours et produire un rapport avec les métriques du modèle" \
+  --problem "Predict 30-day churn and produce a report with model metrics" \
   --provider openai_codex
 ```
 
-The planner receives the business objective, the dataset name and the exact Tool Gateway manifest. ML.agentic creates an isolated run workspace, copies the source dataset to `input.csv`, validates the generated DAG, executes agents and tool calls, then writes `run.json` with the final run summary.
+The planner receives the business objective, the dataset name and the exact Tool Gateway manifest. ML.agentic then:
 
-Generated files such as reports, scripts, metrics or model artifacts remain in:
+1. creates an isolated run workspace;
+2. copies the source dataset to `input.csv`;
+3. validates the generated DAG;
+4. executes eligible agents and tool calls;
+5. writes a structured run summary.
+
+Artifacts are stored under:
 
 ```text
 .ml-agentic/runs/<run_id>/
 ```
 
-The first CLI data runner accepts CSV files only. This is deliberate while dataset ingestion and artifact contracts are stabilized.
+The first data runner deliberately accepts CSV only while ingestion and artifact contracts are stabilized.
 
-## Start the MCP server
+---
+
+## MCP interface
+
+Start the MCP server:
 
 ```bash
 ml-agentic-mcp
 ```
 
-Or with streamable HTTP:
+Or use streamable HTTP:
 
 ```bash
 mcp run src/agentic_data/mcp_server.py --transport streamable-http
 ```
 
-MCP is an optional control interface, not the orchestrator. A UI or compatible client can call `solve_problem`; the selected planner proposes a DAG, ML.agentic validates it, then executes it until completion or a control gate.
+MCP is a **control interface**, not the orchestrator itself. Compatible clients can submit problems and inspect execution while ML.agentic keeps ownership of validation, scheduling and control policies.
+
+---
 
 ## Tool Gateway
 
-`ToolGateway` is the execution boundary between agents and the machine. It exposes named capabilities rather than unrestricted shell access. The first capabilities are:
+`ToolGateway` is the execution boundary between agents and the machine.
 
-- `file.read_text`
-- `file.write_text`
-- `data.inspect_csv`
-- `python.run`
+Current capabilities:
 
-Every path is constrained to a configured workspace. `python.run` executes with isolated Python mode, a bounded timeout and captured output. Agents request tools through a provider-independent JSON protocol, and ML.agentic checks every request against the node's tool allowlist before execution.
-
-## Global operation
-
-1. The user describes the business/data problem and selects a provider.
-2. The selected provider proposes a workflow DAG; ML.agentic validates its shape, dependencies, tool names and 24-node ceiling.
-3. The scheduler releases nodes whose dependencies are satisfied.
-4. Each agent receives only its role, dependency outputs, allowed tools and budget.
-5. Tool requests pass through the ML.agentic Tool Gateway and the agent allowlist.
-6. Tool results are returned to the agent until it emits a final structured result or hits a hard limit.
-7. ML.agentic continues until the DAG completes, a human gate is reached, a provider fails without fallback, or a hard budget is exhausted.
-
-## Security defaults
-
-Providers do not receive unrestricted machine access. A tool must be implemented by the gateway, included in the agent allowlist and pass the configured approval policy. Workspace paths cannot escape their configured workspace. `python.run` is process-isolated and bounded, but it is not yet a hardened OS/container sandbox. Secrets stay in the runner environment and never enter workflow JSON or logs.
-
-## Test
-
-```bash
-python -m unittest discover -s tests -v
+```text
+file.read_text
+file.write_text
+data.inspect_csv
+python.run
 ```
 
-GitHub Actions runs the unit suite on Python 3.11 and 3.12 for pushes and pull requests.
+Every path is constrained to the configured workspace. Tool calls must be implemented by the gateway **and** explicitly allowed for the current agent.
 
-## Local project control dashboard
+For the web runner, `python.run` executes in a Docker container with:
 
-Install and start from a virtual environment:
+- no network access;
+- read-only root filesystem;
+- CPU, memory, process and timeout limits;
+- only the run workspace mounted writable.
+
+Prepare the default image with:
+
+```bash
+docker pull python:3.12-slim
+```
+
+You can point `ML_AGENTIC_PYTHON_IMAGE` to a prebuilt local image containing additional data-science dependencies.
+
+---
+
+## Local dashboard
+
+Install the web extras and start the local control interface:
 
 ```bash
 python -m pip install -e '.[web,test]'
 ml-agentic-web
 ```
 
-Open http://127.0.0.1:8765. Create or open a project, upload a UTF-8 CSV
-(up to 5 MB), describe the problem, choose a provider/model and generate a plan.
-Inspect the agents and tools, set the execution token/turn limits, then select
-**Valider et lancer**. Planning already consumes a provider call; its reported
-usage is charged to the run when launched. These limits do not pre-limit planning.
-Install/authenticate the selected provider separately as described in
-`docs/PROVIDERS_AND_TOKENS.md`.
+Open:
 
-Select a run to inspect its agents, tool results and downloadable artifacts.
-Pause takes effect **between agents**. Paused and approval-gated web runs can
-resume after restarting the server, retaining completed outputs, approvals and
-reported token usage. Checkpoints are stored beside run directories as
-`runs/<run_id>.state.json`. A run interrupted during an agent is not automatically
-replayed: inspect its artifacts before launching a new run. This avoids silently
-repeating actions whose completion is uncertain. CLI/MCP runs do not yet use
-these web-run checkpoints.
-
-The web runner requires Docker for `python.run` and never falls back to host
-Python. Prepare the default image explicitly:
-
-```bash
-docker pull python:3.12-slim
+```text
+http://127.0.0.1:8765
 ```
 
-This image contains Python's standard library. Set `ML_AGENTIC_PYTHON_IMAGE` to a
-prebuilt local image containing your data-science dependencies when needed.
-Containers have no network, a read-only root, restricted capabilities, CPU/memory/
-process limits and a timeout; only the run workspace is mounted writable.
-The existing CLI/MCP gateway still uses host Python. Provider CLI subprocesses
-are a separate boundary and are not placed inside these tool containers.
+From the dashboard you can:
 
-Run one dashboard process/worker on a trusted local machine. It binds to
-loopback and checks Host and per-session mutation tokens. It is not a multi-user
-server: do not expose it to the public network. This version does not promise
-exactly-once tools, mid-agent recovery, or container disk quotas for artifacts.
+- create or open a project;
+- upload a UTF-8 CSV;
+- describe the business problem;
+- choose a provider and model;
+- inspect the generated plan;
+- review agents and allowed tools;
+- configure run limits;
+- approve and launch execution;
+- inspect agent outputs and downloadable artifacts;
+- pause and resume between agents.
+
+The dashboard is intentionally local-first and is **not** presented as a multi-user production server.
+
+---
+
+## Repository map
+
+```text
+.
+├── src/agentic_data/        # contracts, scheduler, CLI, MCP, providers, Tool Gateway
+├── specs/                   # portable workflow examples and configuration
+├── tests/                   # dependency, budget, routing, approval and CLI tests
+├── prototype/               # dependency-free interface concept
+├── docs/                    # product, architecture, providers and roadmap
+└── start.py / start.cmd     # local launcher
+```
+
+---
+
+## Security model
+
+ML.agentic follows a capability-based approach:
+
+- providers do not receive unrestricted filesystem access;
+- tools must exist in the gateway and be present in the current agent allowlist;
+- workspace paths cannot escape their configured root;
+- secrets remain in the runner environment rather than workflow JSON or logs;
+- model autonomy is bounded by explicit execution budgets;
+- web Python execution uses Docker isolation.
+
+### Current limitations
+
+The project does **not** yet claim:
+
+- exactly-once tool execution;
+- mid-agent crash recovery;
+- hardened multi-tenant isolation;
+- artifact disk quotas;
+- production-grade distributed scheduling.
+
+Those boundaries are documented explicitly rather than hidden behind an “autonomous agent” abstraction.
+
+---
+
+## Tests
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-The suite uses deterministic provider doubles. Live provider sign-in and Docker
-execution require a separately configured runner.
+The test suite uses deterministic provider doubles so core orchestration behaviour can be verified without live model credentials.
+
+---
+
+## Roadmap
+
+Near-term directions include:
+
+- richer dataset ingestion beyond CSV;
+- stronger artifact contracts between agents;
+- provider fallback and routing policies;
+- hardened sandboxing and recovery semantics;
+- improved run observability and evaluation;
+- reusable workflow templates for common data-science tasks.
+
+---
+
+## Design note
+
+The internal Python namespace remains `agentic_data` for compatibility; the product and package are **ML.agentic / `ml-agentic`**.
